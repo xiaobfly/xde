@@ -589,6 +589,67 @@ int main(void)
         }
     }
 
+    // Canonical prefix order, and the flag intents recorded in xde102/todo.
+    {
+        static const uint8_t messy[] = { 0x67, 0x66, 0x90 };
+        static const uint8_t canon[] = { 0x66, 0x67, 0x90 };
+        static const uint8_t messy2[] = { 0x64, 0xF3, 0xA4 };
+        static const uint8_t canon2[] = { 0xF3, 0x64, 0xA4 };
+        uint8_t out[16];
+        struct xde_instr d;
+
+        if (xde_disasm(messy, &d) != 3 || xde_asm(out, &d) != 3 ||
+            memcmp(out, canon, 3) != 0) {
+            fail("canonical 66 67", "want 66 67 90");
+        } else {
+            printf("ok %-28s 66 67 90\n", "canonical 66 67");
+        }
+        if (xde_disasm(messy2, &d) != 3 || xde_asm(out, &d) != 3 ||
+            memcmp(out, canon2, 3) != 0) {
+            fail("canonical f3 64", "want F3 64 A4");
+        } else {
+            printf("ok %-28s F3 64 A4\n", "canonical f3 64");
+        }
+    }
+    {
+        static const uint8_t rep_movs[] = { 0xF3, 0xA4 };
+        static const uint8_t rep_cmps[] = { 0xF3, 0xA6 };
+        static const uint8_t cmps[] = { 0xA6 };
+
+        expect_set("rep movsb src no FL", 64, rep_movs, 2, 0, XSET_FL, 0);
+        expect_set("rep movsb dst no FL", 64, rep_movs, 2, 1, XSET_FL, 0);
+        expect_set("rep movsb src RCX", 64, rep_movs, 2, 0, XSET_RCX, 1);
+        expect_set("rep cmpsb src FL", 64, rep_cmps, 2, 0, XSET_FL, 1);
+        expect_set("rep cmpsb dst FL", 64, rep_cmps, 2, 1, XSET_FL, 1);
+        expect_set("cmpsb dst FL", 64, cmps, 1, 1, XSET_FL, 1);
+        expect_set("cmpsb src no FL", 64, cmps, 1, 0, XSET_FL, 0);
+    }
+    {
+        static const uint8_t cld[] = { 0xFC };
+        static const uint8_t stdn[] = { 0xFD };
+        expect_set("cld dst FL", 64, cld, 1, 1, XSET_FL, 1);
+        expect_set("std dst FL", 64, stdn, 1, 1, XSET_FL, 1);
+    }
+    {
+        static const uint8_t sete_al[] = { 0x0F, 0x94, 0xC0 };
+        static const uint8_t sete_r8b[] = { 0x41, 0x0F, 0x94, 0xC0 };
+        char buf[512];
+        struct xde_instr d;
+
+        expect_set("sete al dst", 64, sete_al, 3, 1, XSET_AL, 1);
+        expect_set("sete al src FL", 64, sete_al, 3, 0, XSET_FL, 1);
+        expect_set("sete al (no src AL)", 64, sete_al, 3, 0, XSET_AL, 0);
+        expect_set("sete r8b dst R8B", 64, sete_r8b, 4, 3, XSET2_R8B, 1);
+
+        xde_disasm(sete_al, &d);
+        xde_sprintset(buf, d.src_set);
+        if (strcmp(buf, "???") == 0) {
+            fail("sete al not undef", buf);
+        } else {
+            printf("ok %-28s %s\n", "sete al not undef", buf);
+        }
+    }
+
     {
         static const uint8_t pop[] = { 0x8F, 0xC0 };
         expect_len("pop rax (8F /0)", 64, pop, 2, 2);

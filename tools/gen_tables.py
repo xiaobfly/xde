@@ -239,8 +239,8 @@ m0[0xF8] = 0
 m0[0xF9] = 0
 m0[0xFA] = XA_BAD
 m0[0xFB] = XA_BAD
-m0[0xFC] = 0
-m0[0xFD] = 0
+m0[0xFC] = 0  # CLD
+m0[0xFD] = 0  # STD
 m0[0xFE] = XA_MODRM | GRP(XG_4) | XA_OPSZ8
 m0[0xFF] = XA_MODRM | GRP(XG_5)
 
@@ -312,7 +312,7 @@ for i in rng(0x80, 0x8F):
     m1[i] = IMM_IZ | XA_REL | XA_F64 | XA_JCC | XA_UNDEF
 
 for i in rng(0x90, 0x9F):
-    m1[i] = XA_MODRM | XA_OPSZ8 | XA_UNDEF  # SETcc / kmov
+    m1[i] = XA_MODRM | XA_OPSZ8  # SETcc; FL read is in apply_usage_special
 
 m1[0xA0] = XA_PUSH | XA_D64
 m1[0xA1] = XA_POP | XA_D64

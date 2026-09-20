@@ -152,13 +152,12 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
     uint64_t xset;
     uint8_t c = (uint8_t)opcode;
 
-    // REP/REPE/REPNE: CX/ECX/RCX is src and dst. Flags are read for CMPS/SCAS
-    // termination; other reps do not write flags.
+    // REP/REPE/REPNE: CX/ECX/RCX is src and dst. The prefix alone says nothing
+    // about flags; only CMPS/SCAS touch them (see below).
     if (diza->p_rep) {
         xset = (mode == 64) ? XSET_RCX : (addr == 2 ? XSET_CX : XSET_ECX);
         diza->src_set |= xset;
         diza->dst_set |= xset;
-        diza->src_set |= XSET_FL;
     }
 
     if (diza->map == XDE_MAP_LEGACY) {
@@ -237,6 +236,16 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
         }
         if (c == 0x8C) diza->src_set |= XSET_OTHER;
         if (c == 0x8E) diza->dst_set |= XSET_OTHER;
+        // CMPS (A6/A7) and SCAS (AE/AF) write FL; with a REP prefix the loop
+        // also reads ZF. CLD (FC) / STD (FD) write DF, which folds into FL.
+        // MOVS/STOS/LODS/INS/OUTS never touch flags, and DF is deliberately
+        // not reported as a source (see xde102/todo).
+        if ((c == 0xA6) || (c == 0xA7) || (c == 0xAE) || (c == 0xAF) ||
+            (c == 0xFC) || (c == 0xFD))
+            diza->dst_set |= XSET_FL;
+        if (diza->p_rep &&
+            ((c == 0xA6) || (c == 0xA7) || (c == 0xAE) || (c == 0xAF)))
+            diza->src_set |= XSET_FL;   // REP loop tests ZF
     } else if (diza->map == XDE_MAP_0F) {
         uint8_t c2 = (uint8_t)opcode2;
         if ((c2 == 0xB2) || (c2 == 0xB4) || (c2 == 0xB5) || (c2 == 0xA1) || (c2 == 0xA9))
@@ -249,6 +258,9 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
         }
         if ((c2 == 0xA5) || (c2 == 0xAD))
             diza->src_set |= XSET_CL;
+        // SETcc tests the flags it was chosen for; its r/m8 is write-only.
+        if (c2 >= 0x90 && c2 <= 0x9F)
+            diza->src_set |= XSET_FL;
     }
 
     (void)attr;
@@ -266,6 +278,8 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // ModR/M.reg with its REX/REX2 extension bits (r16-r31 need bit 4).
     unsigned regx = ((unsigned)diza->rex_r4 << 4) |
                     ((unsigned)diza->rex_r << 3) | reg;
+    // SETcc (0F 90-9F) only writes its r/m8 and tests the flags.
+    int setcc = (diza->map == XDE_MAP_0F && c == 0x0F && c2 >= 0x90 && c2 <= 0x9F);
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -333,19 +347,21 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             rset = XSET_OTHER;
             rset2 = 0;
         }
-        // MOV store forms (88/89, C6/C7) only write their r/m operand, so it
-        // must not land in src_set; every other form reads it too.
-        if (c != 0x8D && c != 0x88 && c != 0x89 && c != 0xC6 && c != 0xC7) {
+        // MOV store forms (88/89, C6/C7) and SETcc only write their r/m
+        // operand, so it must not land in src_set; other forms read it.
+        if (!setcc && c != 0x8D && c != 0x88 && c != 0x89 &&
+            c != 0xC6 && c != 0xC7) {
             diza->src_set |= rset;
             diza->src_set2 |= rset2;
         }
-        // dest of r/m for ALU, MOV r/m, shifts, etc.
-        if (diza->map == XDE_MAP_LEGACY &&
-            ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
-             c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
-             (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
-             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
-             c == 0xC6 || c == 0xC7)) {
+        // dest of r/m for ALU, MOV r/m, shifts, SETcc, etc.
+        if (setcc ||
+            (diza->map == XDE_MAP_LEGACY &&
+             ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
+              c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
+              (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
+              c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
+              c == 0xC6 || c == 0xC7))) {
             diza->dst_set |= rset;
             diza->dst_set2 |= rset2;
         }
@@ -356,16 +372,17 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             diza->src_set2 |= m2;
         }
     } else {
-        if (c != 0x8D) {
+        if (!setcc && c != 0x8D) {
             diza->src_set |= XSET_OTHER; // segment override
             diza->src_set |= XSET_MEM;
         }
-        if (diza->map == XDE_MAP_LEGACY &&
-            ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
-             c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
-             (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
-             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
-             c == 0xC6 || c == 0xC7))
+        if (setcc ||
+            (diza->map == XDE_MAP_LEGACY &&
+             ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
+              c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
+              (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
+              c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
+              c == 0xC6 || c == 0xC7)))
             diza->dst_set |= XSET_MEM;
         else if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2)
             diza->src_set |= XSET_MEM;
@@ -1016,16 +1033,15 @@ static unsigned asm_size(const struct xde_instr *diza, unsigned nvex,
 {
     unsigned n = 0;
 
-    if (diza->p_seg)  n++;
     if (diza->p_lock) n++;
     if (diza->p_rep)  n++;
+    if (diza->p_seg)  n++;
+    if (diza->p_66)   n++;
     if (diza->p_67)   n++;
 
     if (nvex) {
-        if (diza->p_66) n++;
         n += nvex + 1;
     } else {
-        if (diza->p_66) n++;
         if (diza->rex)  n++;
         n++;
         if (diza->opcode == 0x0F) {
@@ -1060,19 +1076,20 @@ int __cdecl xde_asm_buf(uint8_t *opcode, unsigned max_len, const struct xde_inst
 
     p = opcode;
 
-    if (diza->p_seg)  *p++ = diza->p_seg;
+    // Legacy prefixes in SDM group order (1: lock/rep, 2: segment, 3: operand
+    // size, 4: address size), so re-encoding always yields the canonical order
+    // no matter what order the input used.
     if (diza->p_lock) *p++ = diza->p_lock;
     if (diza->p_rep)  *p++ = diza->p_rep;
+    if (diza->p_seg)  *p++ = diza->p_seg;
+    if (diza->p_66)   *p++ = diza->p_66;
     if (diza->p_67)   *p++ = diza->p_67;
 
     if (nvex) {
-        // REX2 keeps its legacy prefixes (VEX/EVEX/XOP clear p_66).
-        if (diza->p_66) *p++ = diza->p_66;
         for (i = 0; i < nvex; i++)
             *p++ = diza->vex[i];
         *p++ = diza->opcode;
     } else {
-        if (diza->p_66) *p++ = diza->p_66;
         if (diza->rex)  *p++ = diza->rex;
         *p++ = diza->opcode;
         if (diza->opcode == 0x0F) {
