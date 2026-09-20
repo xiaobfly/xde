@@ -284,7 +284,11 @@ int __cdecl xde_disasm_ex(const uint8_t *opcode, struct xde_instr *diza, unsigne
 int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len, struct xde_instr *diza, unsigned mode);
 
 // Encode from a filled xde_instr. Returns bytes written.
+// xde_asm() writes at most XDE_MAXLEN bytes.
+// xde_asm_buf() also bounds the write to max_len bytes and returns 0 if the
+// struct would need more.
 int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza);
+int __cdecl xde_asm_buf(uint8_t *opcode, unsigned max_len, const struct xde_instr *diza);
 
 // Debug printers (optional). output should be at least 256 bytes.
 void __cdecl xde_sprintfl(char *output, uint64_t fl);

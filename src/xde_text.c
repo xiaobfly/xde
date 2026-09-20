@@ -19,6 +19,23 @@ void __cdecl xde_sprintfl(char *output, uint64_t fl)
     if (fl & C_XOP)    strcat(output, "C_XOP|");
     if (fl & C_REX2)   strcat(output, "C_REX2|");
     if (fl & C_UNDEF)  strcat(output, "C_UNDEF|");
+    // Sizes are readable from addrsize/datasize and p_66/p_67, so the
+    // C_ADDR*/C_DATA*/C_ADDR67/C_DATA66 flags are not repeated here.
+    if (fl & C_OPSZ8)  strcat(output, "C_OPSZ8|");
+    if (fl & C_PUSH)   strcat(output, "C_PUSH|");
+    if (fl & C_POP)    strcat(output, "C_POP|");
+    if (fl & C_I64)    strcat(output, "C_I64|");
+    if (fl & C_O64)    strcat(output, "C_O64|");
+    if (fl & C_F64)    strcat(output, "C_F64|");
+    if (fl & C_D64)    strcat(output, "C_D64|");
+    if (fl & C_3DNOW)  strcat(output, "C_3DNOW|");
+    switch (XDE_CMD(fl)) {
+    case C_CMD_CALL: strcat(output, "C_CMD_CALL|"); break;
+    case C_CMD_JMP:  strcat(output, "C_CMD_JMP|");  break;
+    case C_CMD_JCC:  strcat(output, "C_CMD_JCC|");  break;
+    case C_CMD_RET:  strcat(output, "C_CMD_RET|");  break;
+    default: break;
+    }
     if (output[0] && output[strlen(output) - 1] == '|')
         output[strlen(output) - 1] = 0;
 }
@@ -27,7 +44,7 @@ void __cdecl xde_sprintset(char *output, uint64_t set)
 {
     output[0] = 0;
 
-    if (set == XSET_UNDEF) {
+    if ((set & XSET_UNDEF) == XSET_UNDEF) {
         strcat(output, "???");
         return;
     }
@@ -114,7 +131,7 @@ void __cdecl xde_sprintset2(char *output, uint64_t set2)
 
     output[0] = 0;
 
-    if (set2 == XSET2_ALL) {
+    if ((set2 & XSET2_ALL) == XSET2_ALL) {
         strcat(output, "???");
         return;
     }

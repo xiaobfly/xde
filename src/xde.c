@@ -84,7 +84,9 @@ static uint64_t gp_set(int sz, unsigned reg, int rex, uint64_t *egpr)
         return w16[reg];
     if (sz == 4)
         return w32[reg];
-    return w64[reg];
+    if (sz == 8)
+        return w64[reg];
+    return XSET_OTHER;   // unexpected size: do not claim 64-bit
 }
 
 static uint64_t stack_set(unsigned mode)
@@ -373,7 +375,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
 static void apply_implicit_gp(struct xde_instr *diza, uint32_t attr)
 {
     uint8_t c = diza->opcode;
-    int rex = (diza->rex != 0);
+    int rex = (diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY);
     int sz = (attr & XA_OPSZ8) ? 1 : (int)diza->defdata;
     int dsz = (diza->mode == 64 && sz == 4) ? 8 : sz;
     uint64_t xset;
@@ -545,8 +547,7 @@ static int parse_modrm(xde_cur *cur, struct xde_instr *diza, uint32_t attr)
         diza->addrsize = (uint8_t)disp;
         if (disp == 1) diza->flag |= C_ADDR1;
         else if (disp == 2) diza->flag |= C_ADDR2;
-        else if (disp == 4) diza->flag |= C_ADDR4;
-        else diza->flag |= C_ADDR8;
+        else diza->flag |= C_ADDR4;   // disp is 1, 2 or 4 here
     }
     return 1;
 }
@@ -836,7 +837,8 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
     if (b == 0x8F) {
         if (!peek_byte(&cur, 1, &b1))
             return 0;
-        if ((b1 & 0x1F) >= 8) {
+        // In 16/32-bit mode XOP needs mod == 11b, else this is POP r/m.
+        if ((b1 & 0x1F) >= 8 && (mode == 64 || (b1 & 0xC0) == 0xC0)) {
             if (!peek_byte(&cur, 2, &b2))
                 return 0;
             diza->enc = XDE_ENC_XOP;
@@ -888,8 +890,10 @@ got_opcode:
 
     // Group extra (immediate / CALL / JMP) after ModR/M.reg
     if (attr & XA_GROUP) {
-        if (!(attr & XA_MODRM))
+        if (!(attr & XA_MODRM)) {
             attr |= XA_MODRM;
+            diza->flag |= C_MODRM;   // apply_attr_flags has already run
+        }
     }
 
     if (attr & XA_MODRM) {
@@ -985,13 +989,13 @@ got_opcode:
         else if (dbytes == 6) diza->flag |= C_DATA4 | C_DATA2;
     }
 
-    // 3DNow: extra opcode byte after operands is already counted as Ib.
+    // 3DNow needs no special case here: the table models the trailing opcode
+    // byte as XA_IMM_IB, and XA_3DNOW only sets C_3DNOW.
     {
         unsigned len = (unsigned)(cur.p - opcode);
         if (len == 0 || len > XDE_MAXLEN)
             return 0;
         diza->len = (uint8_t)len;
-        diza->flag |= (attr & XA_REL) ? C_REL : 0;
         return (int)len;
     }
 }
@@ -1006,13 +1010,54 @@ int __cdecl xde_disasm(const uint8_t *opcode, struct xde_instr *diza)
     return xde_disasm_buf(opcode, XDE_MAXLEN, diza, XDE_MODE_64);
 }
 
-int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza)
+// Bytes xde_asm_buf() emits for counts already clamped to the arrays.
+static unsigned asm_size(const struct xde_instr *diza, unsigned nvex,
+                         unsigned naddr, unsigned ndata)
+{
+    unsigned n = 0;
+
+    if (diza->p_seg)  n++;
+    if (diza->p_lock) n++;
+    if (diza->p_rep)  n++;
+    if (diza->p_67)   n++;
+
+    if (nvex) {
+        if (diza->p_66) n++;
+        n += nvex + 1;
+    } else {
+        if (diza->p_66) n++;
+        if (diza->rex)  n++;
+        n++;
+        if (diza->opcode == 0x0F) {
+            n++;
+            if (diza->opcode2 == 0x38 || diza->opcode2 == 0x3A)
+                n++;
+        }
+    }
+
+    if (diza->flag & C_MODRM) n++;
+    if (diza->flag & C_SIB)   n++;
+    return n + naddr + ndata;
+}
+
+int __cdecl xde_asm_buf(uint8_t *opcode, unsigned max_len, const struct xde_instr *diza)
 {
     uint8_t *p;
-    unsigned i;
+    unsigned i, nvex, naddr, ndata;
 
     if (!opcode || !diza)
         return 0;
+    if (max_len == 0 || max_len > XDE_MAXLEN)
+        max_len = XDE_MAXLEN;
+
+    // Counts are caller-supplied; clamp them to what the arrays hold.
+    nvex  = diza->nvex     > sizeof(diza->vex)    ? (unsigned)sizeof(diza->vex)    : diza->nvex;
+    naddr = diza->addrsize > sizeof(diza->addr_b) ? (unsigned)sizeof(diza->addr_b) : diza->addrsize;
+    ndata = diza->datasize > sizeof(diza->data_b) ? (unsigned)sizeof(diza->data_b) : diza->datasize;
+
+    if (asm_size(diza, nvex, naddr, ndata) > max_len)
+        return 0;
+
     p = opcode;
 
     if (diza->p_seg)  *p++ = diza->p_seg;
@@ -1020,10 +1065,10 @@ int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza)
     if (diza->p_rep)  *p++ = diza->p_rep;
     if (diza->p_67)   *p++ = diza->p_67;
 
-    if (diza->nvex) {
+    if (nvex) {
         // REX2 keeps its legacy prefixes (VEX/EVEX/XOP clear p_66).
         if (diza->p_66) *p++ = diza->p_66;
-        for (i = 0; i < diza->nvex; i++)
+        for (i = 0; i < nvex; i++)
             *p++ = diza->vex[i];
         *p++ = diza->opcode;
     } else {
@@ -1039,8 +1084,13 @@ int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza)
 
     if (diza->flag & C_MODRM) *p++ = diza->modrm;
     if (diza->flag & C_SIB)   *p++ = diza->sib;
-    for (i = 0; i < diza->addrsize; i++) *p++ = diza->addr_b[i];
-    for (i = 0; i < diza->datasize; i++) *p++ = diza->data_b[i];
+    for (i = 0; i < naddr; i++) *p++ = diza->addr_b[i];
+    for (i = 0; i < ndata; i++) *p++ = diza->data_b[i];
 
     return (int)(p - opcode);
+}
+
+int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza)
+{
+    return xde_asm_buf(opcode, XDE_MAXLEN, diza);
 }

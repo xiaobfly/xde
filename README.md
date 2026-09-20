@@ -13,7 +13,7 @@ AVX/AVX-512/XOP encodings.
 - Instruction **length** (capped at 15 bytes, Intel limit)
 - Splits an instruction into `struct xde_instr` (prefixes, REX/VEX/EVEX/XOP,
   opcode map, ModR/M, SIB, displacement, immediate)
-- Merges the structure back to bytes (`xde_asm`)
+- Merges the structure back to bytes (`xde_asm`, bounded `xde_asm_buf`)
 - Tracks **src_set / dst_set** bitmasks for GPRs, flags, memory, and I/O
   (SIMD/mask/control registers collapse to `XSET_OTHER`, same idea as 1.02);
   8-bit `SPL/BPL/SIL/DIL` are distinct from `SP/BP/SI/DI`, and APX EGPRs
@@ -60,7 +60,8 @@ struct xde_instr diza;
 int n = xde_disasm(ptr, &diza);				// 64-bit mode
 n = xde_disasm_ex(ptr, &diza, XDE_MODE_32); // 16 / 32 / 64
 n = xde_disasm_buf(ptr, max_len, &diza, XDE_MODE_64);
-int m = xde_asm(out, &diza);
+int m = xde_asm(out, &diza);				// at most 15 bytes
+m = xde_asm_buf(out, out_len, &diza);		// 0 if the struct needs more
 ```
 
 `n == 0` means the encoding is truncated, invalid in this mode, or undefined.

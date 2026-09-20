@@ -137,6 +137,27 @@ static void expect_set(const char *name, unsigned mode, const uint8_t *b, unsign
            (unsigned long long)bit, want ? "set" : "clear");
 }
 
+// Assert that one flag bit is set (want=1) or clear (want=0).
+static void expect_flag(const char *name, unsigned mode, const uint8_t *b, unsigned n,
+                        uint64_t bit, int want)
+{
+    struct xde_instr d;
+
+    if (xde_disasm_buf(b, n, &d, mode) != (int)n) {
+        fail(name, "decode length mismatch");
+        return;
+    }
+    if (((d.flag & bit) != 0) != (want != 0)) {
+        char msg[128];
+        sprintf(msg, "flag 0x%llX want=%d got=0x%llX", (unsigned long long)bit, want,
+                (unsigned long long)d.flag);
+        fail(name, msg);
+        return;
+    }
+    printf("ok %-28s flag 0x%llX %s\n", name, (unsigned long long)bit,
+           want ? "set" : "clear");
+}
+
 int main(void)
 {
     // 64-bit GP
@@ -480,6 +501,92 @@ int main(void)
         static const uint8_t mov_r8d[] = { 0x44, 0x8B, 0xC0 };
         expect_set("mov r8d,eax R8", 64, mov_r8d, 3, 1, XSET_R8, 1);
         expect_set("mov r8d,eax (no R8B)", 64, mov_r8d, 3, 3, XSET2_R8B, 0);
+    }
+
+    // XOP gate in 16/32-bit, the relocated C_REL flag, and xde_asm limits.
+    {
+        static const uint8_t xop32[] = { 0x8F, 0x08 };
+        expect_len("8f 08 (32-bit POP)", 32, xop32, 2, 2);
+        expect_flag("8f 08 bad (32)", 32, xop32, 2, C_BAD, 1);
+    }
+    {
+        static const uint8_t callrel[] = { 0xE8, 0x00, 0x00, 0x00, 0x00 };
+        expect_flag("call rel32 has C_REL", 64, callrel, 5, C_REL, 1);
+        expect_flag("call rel32 no C_BAD", 64, callrel, 5, C_BAD, 0);
+    }
+    {
+        // Counts longer than the arrays must not read or write past them.
+        uint8_t out[32];
+        struct xde_instr d;
+
+        memset(&d, 0, sizeof(d));
+        d.opcode = 0x90;
+        d.datasize = 200;
+        if (xde_asm(out, &d) != 9) {
+            fail("asm clamp datasize", "want 9");
+        } else {
+            printf("ok %-28s clamped\n", "asm clamp datasize");
+        }
+        d.datasize = 0;
+        d.addrsize = 200;
+        if (xde_asm(out, &d) != 9) {
+            fail("asm clamp addrsize", "want 9");
+        } else {
+            printf("ok %-28s clamped\n", "asm clamp addrsize");
+        }
+        d.addrsize = 0;
+        d.nvex = 200;
+        if (xde_asm(out, &d) != 5) {
+            fail("asm clamp nvex", "want 5");
+        } else {
+            printf("ok %-28s clamped\n", "asm clamp nvex");
+        }
+    }
+    {
+        static const uint8_t rip7[] = { 0x48, 0x8B, 0x05, 0x00, 0x00, 0x00, 0x00 };
+        uint8_t out[16];
+        struct xde_instr d;
+
+        xde_disasm(rip7, &d);
+        if (xde_asm_buf(out, 4, &d) != 0) {
+            fail("asm_buf too small", "want 0");
+        } else {
+            printf("ok %-28s refused\n", "asm_buf too small");
+        }
+        if (xde_asm_buf(out, 7, &d) != 7) {
+            fail("asm_buf exact", "want 7");
+        } else {
+            printf("ok %-28s fits\n", "asm_buf exact");
+        }
+    }
+    {
+        char buf[512];
+        struct xde_instr d;
+        static const uint8_t pushrbp[] = { 0x55 };
+        static const uint8_t retn[] = { 0xC3 };
+
+        xde_disasm(pushrbp, &d);
+        xde_sprintfl(buf, d.flag);
+        if (strstr(buf, "C_PUSH") == NULL) {
+            fail("sprintfl C_PUSH", buf);
+        } else {
+            printf("ok %-28s %s\n", "sprintfl C_PUSH", buf);
+        }
+
+        xde_disasm(retn, &d);
+        xde_sprintfl(buf, d.flag);
+        if (strstr(buf, "C_CMD_RET") == NULL) {
+            fail("sprintfl C_CMD_RET", buf);
+        } else {
+            printf("ok %-28s %s\n", "sprintfl C_CMD_RET", buf);
+        }
+
+        xde_sprintset2(buf, XSET2_ALL | 0x10000000000ULL);
+        if (strcmp(buf, "???") != 0) {
+            fail("sprintset2 undef subset", buf);
+        } else {
+            printf("ok %-28s %s\n", "sprintset2 undef subset", buf);
+        }
     }
 
     {
