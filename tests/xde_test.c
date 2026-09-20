@@ -1002,6 +1002,78 @@ int main(void)
             expect_set("sarx src rm ECX", 64, sarx, 5, 0, XSET_ECX, 1);
             expect_set("sarx src vvvv EAX", 64, sarx, 5, 0, XSET_EAX, 1);
         }
+        // XA_VVVV_GPR covers the BMI family: every operand is a GPR, so
+        // OTHER must never appear on either side. One encoding per opcode,
+        // half of them with vvvv == 0 (EAX) and half with a non-zero vvvv.
+        {
+            static const uint8_t andn70[]  = { 0xC4, 0xE2, 0x70, 0xF2, 0xD0 }; // andn edx,ecx,eax
+            static const uint8_t bextr78[] = { 0xC4, 0xE2, 0x78, 0xF7, 0xD1 }; // bextr edx,ecx,eax
+            static const uint8_t bzhi70[]  = { 0xC4, 0xE2, 0x70, 0xF5, 0xD0 }; // bzhi edx,ecx,eax
+            static const uint8_t sarx7a[]  = { 0xC4, 0xE2, 0x7A, 0xF7, 0xD1 }; // sarx edx,ecx,eax
+            static const uint8_t shlx71[]  = { 0xC4, 0xE2, 0x71, 0xF7, 0xD0 }; // shlx edx,ecx,eax
+            static const uint8_t shrx7b[]  = { 0xC4, 0xE2, 0x7B, 0xF7, 0xD1 }; // shrx edx,ecx,eax
+            expect_set("andn70 dst reg EDX", 64, andn70, 5, 1, XSET_EDX, 1);
+            expect_set("andn70 src rm EAX", 64, andn70, 5, 0, XSET_EAX, 1);
+            expect_set("andn70 src vvvv ECX", 64, andn70, 5, 0, XSET_ECX, 1);
+            expect_set("andn70 no src other", 64, andn70, 5, 0, XSET_OTHER, 0);
+            expect_set("andn70 no dst other", 64, andn70, 5, 1, XSET_OTHER, 0);
+            expect_set("andn70 no src mem", 64, andn70, 5, 0, XSET_MEM, 0);
+            expect_set("andn70 no dst mem", 64, andn70, 5, 1, XSET_MEM, 0);
+            expect_set("bextr78 dst reg EDX", 64, bextr78, 5, 1, XSET_EDX, 1);
+            expect_set("bextr78 src rm ECX", 64, bextr78, 5, 0, XSET_ECX, 1);
+            expect_set("bextr78 src vvvv EAX", 64, bextr78, 5, 0, XSET_EAX, 1);
+            expect_set("bextr78 no src other", 64, bextr78, 5, 0, XSET_OTHER, 0);
+            expect_set("bextr78 no dst other", 64, bextr78, 5, 1, XSET_OTHER, 0);
+            expect_set("bextr78 no src mem", 64, bextr78, 5, 0, XSET_MEM, 0);
+            expect_set("bextr78 no dst mem", 64, bextr78, 5, 1, XSET_MEM, 0);
+            expect_set("bzhi70 dst reg EDX", 64, bzhi70, 5, 1, XSET_EDX, 1);
+            expect_set("bzhi70 src rm EAX", 64, bzhi70, 5, 0, XSET_EAX, 1);
+            expect_set("bzhi70 src vvvv ECX", 64, bzhi70, 5, 0, XSET_ECX, 1);
+            expect_set("bzhi70 no src other", 64, bzhi70, 5, 0, XSET_OTHER, 0);
+            expect_set("bzhi70 no dst other", 64, bzhi70, 5, 1, XSET_OTHER, 0);
+            expect_set("bzhi70 no src mem", 64, bzhi70, 5, 0, XSET_MEM, 0);
+            expect_set("bzhi70 no dst mem", 64, bzhi70, 5, 1, XSET_MEM, 0);
+            expect_set("sarx7a dst reg EDX", 64, sarx7a, 5, 1, XSET_EDX, 1);
+            expect_set("sarx7a src rm ECX", 64, sarx7a, 5, 0, XSET_ECX, 1);
+            expect_set("sarx7a src vvvv EAX", 64, sarx7a, 5, 0, XSET_EAX, 1);
+            expect_set("sarx7a no src other", 64, sarx7a, 5, 0, XSET_OTHER, 0);
+            expect_set("sarx7a no dst other", 64, sarx7a, 5, 1, XSET_OTHER, 0);
+            expect_set("sarx7a no src mem", 64, sarx7a, 5, 0, XSET_MEM, 0);
+            expect_set("sarx7a no dst mem", 64, sarx7a, 5, 1, XSET_MEM, 0);
+            expect_set("shlx71 dst reg EDX", 64, shlx71, 5, 1, XSET_EDX, 1);
+            expect_set("shlx71 src rm EAX", 64, shlx71, 5, 0, XSET_EAX, 1);
+            expect_set("shlx71 src vvvv ECX", 64, shlx71, 5, 0, XSET_ECX, 1);
+            expect_set("shlx71 no src other", 64, shlx71, 5, 0, XSET_OTHER, 0);
+            expect_set("shlx71 no dst other", 64, shlx71, 5, 1, XSET_OTHER, 0);
+            expect_set("shlx71 no src mem", 64, shlx71, 5, 0, XSET_MEM, 0);
+            expect_set("shlx71 no dst mem", 64, shlx71, 5, 1, XSET_MEM, 0);
+            expect_set("shrx7b dst reg EDX", 64, shrx7b, 5, 1, XSET_EDX, 1);
+            expect_set("shrx7b src rm ECX", 64, shrx7b, 5, 0, XSET_ECX, 1);
+            expect_set("shrx7b src vvvv EAX", 64, shrx7b, 5, 0, XSET_EAX, 1);
+            expect_set("shrx7b no src other", 64, shrx7b, 5, 0, XSET_OTHER, 0);
+            expect_set("shrx7b no dst other", 64, shrx7b, 5, 1, XSET_OTHER, 0);
+            expect_set("shrx7b no src mem", 64, shrx7b, 5, 0, XSET_MEM, 0);
+            expect_set("shrx7b no dst mem", 64, shrx7b, 5, 1, XSET_MEM, 0);
+        }
+        // Plain vector VEX still folds both sides to OTHER, whatever vvvv
+        // decodes to: 0xF0 has vvvv = ECX, 0xF8 has vvvv = 0 (vvvv is not a
+        // "no operand" sentinel, it just names a register).
+        {
+            static const uint8_t vaddps70[] = { 0xC5, 0xF0, 0x58, 0xC2 };
+            static const uint8_t vaddps78[] = { 0xC5, 0xF8, 0x58, 0xC1 };
+            expect_set("vaddps vvvv=1 src other", 64, vaddps70, 4, 0, XSET_OTHER, 1);
+            expect_set("vaddps vvvv=1 dst other", 64, vaddps70, 4, 1, XSET_OTHER, 1);
+            expect_set("vaddps vvvv=0 src other", 64, vaddps78, 4, 0, XSET_OTHER, 1);
+            expect_set("vaddps vvvv=0 dst other", 64, vaddps78, 4, 1, XSET_OTHER, 1);
+        }
+        // EVEX carries V', so vvvv can name an APX EGPR (r16-r31) of the same
+        // GPR fold: ANDN with vvvv = r16 must land in the second set word.
+        {
+            static const uint8_t ev_andn_r16[] = { 0x62, 0xF2, 0x7C, 0x00, 0xF2, 0xC0 };
+            expect_set("evex andn src vvvv R16", 64, ev_andn_r16, 6, 2, XSET2_R16, 1);
+            expect_set("evex andn no src other", 64, ev_andn_r16, 6, 0, XSET_OTHER, 0);
+            expect_set("evex andn dst reg EAX", 64, ev_andn_r16, 6, 1, XSET_EAX, 1);
+        }
     }
     // Addressing forms: SIB with an index, without one, and disp32 no base.
     {

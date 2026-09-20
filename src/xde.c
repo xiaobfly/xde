@@ -332,20 +332,20 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     if (diza->mode == 64 && dsz == 4)
         dsz = 8;
 
-    // Vector encodings use OTHER for the reg field.
+    // A vector encoding always carries at least one vector / mask / control
+    // register, so both sets fold to OTHER outright; no vvvv test is needed
+    // for that. XA_VVVV_GPR marks the VEX/EVEX/XOP forms whose operands are
+    // all GPRs (BMI, RORX, XOP vvvv forms): vvvv names a GPR there, 0
+    // included, which is EAX.
     if (diza->enc == XDE_ENC_VEX2 || diza->enc == XDE_ENC_VEX3 ||
         diza->enc == XDE_ENC_EVEX || diza->enc == XDE_ENC_XOP) {
-        diza->src_set |= XSET_OTHER;
-        diza->dst_set |= XSET_OTHER;
         if (attr & XA_VVVV_GPR) {
-            // vvvv always names a GPR here, 0 included (that is EAX). The
-            // 0/0xF skip below only applies to vector operands, where those
-            // values encode "no vvvv".
             uint64_t v2 = 0;
             diza->src_set |= gp_set(dsz, diza->vex_vvvv, 1, &v2);
             diza->src_set2 |= v2;
-        } else if (diza->vex_vvvv != 0 && diza->vex_vvvv != 0xF) {
+        } else {
             diza->src_set |= XSET_OTHER;
+            diza->dst_set |= XSET_OTHER;
         }
     }
 
