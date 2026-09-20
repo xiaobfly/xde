@@ -251,6 +251,17 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
         if (diza->p_rep &&
             ((c == 0xA6) || (c == 0xA7) || (c == 0xAE) || (c == 0xAF)))
             diza->src_set |= XSET_FL;   // REP loop tests ZF
+        // Jcc and LOOP/JCXZ read only what they test: the flags, and the count
+        // in CX/ECX/RCX (which LOOP also decrements). Nothing else is unknown,
+        // so these carry no XA_UNDEF.
+        if ((c >= 0x70 && c <= 0x7F) || (c == 0xE0) || (c == 0xE1))
+            diza->src_set |= XSET_FL;
+        if (c >= 0xE0 && c <= 0xE3) {
+            xset = (mode == 64) ? XSET_RCX : (addr == 2 ? XSET_CX : XSET_ECX);
+            diza->src_set |= xset;
+            if (c != 0xE3)
+                diza->dst_set |= xset;   // LOOP decrements the count
+        }
     } else if (diza->map == XDE_MAP_0F) {
         uint8_t c2 = (uint8_t)opcode2;
         if ((c2 == 0xB2) || (c2 == 0xB4) || (c2 == 0xB5) || (c2 == 0xA1) || (c2 == 0xA9))
@@ -266,6 +277,8 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
         // SETcc tests the flags it was chosen for; its r/m8 is write-only.
         if (c2 >= 0x90 && c2 <= 0x9F)
             diza->src_set |= XSET_FL;
+        if (c2 >= 0x80 && c2 <= 0x8F)
+            diza->src_set |= XSET_FL;   // Jcc rel32 reads FL
     }
 
     (void)attr;

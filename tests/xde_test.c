@@ -850,6 +850,50 @@ int main(void)
         expect_len("call rax", 64, callreg, 2, 2);
     }
 
+    // Jcc and LOOP/JCXZ report what they test instead of an undefined set.
+    {
+        static const uint8_t jz8t[] = { 0x74, 0x00 };
+        static const uint8_t jz32t[] = { 0x0F, 0x84, 0, 0, 0, 0 };
+        static const uint8_t jmp8t[] = { 0xEB, 0x00 };
+        static const uint8_t loopn[] = { 0xE2, 0x00 };
+        static const uint8_t loope[] = { 0xE1, 0x00 };
+        static const uint8_t jcxz[] = { 0xE3, 0x00 };
+        char buf[512];
+        struct xde_instr d;
+
+        expect_set("jz rel8 src FL", 64, jz8t, 2, 0, XSET_FL, 1);
+        expect_set("jz rel32 src FL", 64, jz32t, 6, 0, XSET_FL, 1);
+        expect_set("loop src RCX", 64, loopn, 2, 0, XSET_RCX, 1);
+        expect_set("loop dst RCX", 64, loopn, 2, 1, XSET_RCX, 1);
+        expect_set("loop (no FL)", 64, loopn, 2, 0, XSET_FL, 0);
+        expect_set("loope src FL", 64, loope, 2, 0, XSET_FL, 1);
+        expect_set("jcxz src RCX", 64, jcxz, 2, 0, XSET_RCX, 1);
+        expect_set("jcxz (no dst RCX)", 64, jcxz, 2, 1, XSET_RCX, 0);
+
+        // A relative JMP touches nothing at all, and no Jcc stays undefined.
+        xde_disasm(jmp8t, &d);
+        xde_sprintset(buf, d.src_set);
+        if (strcmp(buf, "") != 0) {
+            fail("jmp rel8 empty src", buf);
+        } else {
+            printf("ok %-28s (empty)\n", "jmp rel8 empty src");
+        }
+        xde_sprintset(buf, d.dst_set);
+        if (strcmp(buf, "") != 0) {
+            fail("jmp rel8 empty dst", buf);
+        } else {
+            printf("ok %-28s (empty)\n", "jmp rel8 empty dst");
+        }
+
+        xde_disasm(jz8t, &d);
+        xde_sprintset(buf, d.src_set);
+        if (strcmp(buf, "F") != 0) {
+            fail("jz rel8 src is F", buf);
+        } else {
+            printf("ok %-28s F\n", "jz rel8 src is F");
+        }
+    }
+
     // 16-bit
     {
         static const uint8_t add16[] = { 0x01, 0xC0 };

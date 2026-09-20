@@ -97,8 +97,14 @@ only as the width-agnostic `R8`-`R15`.
 - Re-encoding emits the legacy prefixes in canonical group order (lock/rep,
   segment, `66`, `67`), so a non-canonical input normalises on `xde_asm`.
 - Flag reporting: `CMPS`/`SCAS`, `CLD`/`STD`, the shifts (`C0`/`C1`/`D0`-`D3`) and
-  group 3 (`F6`/`F7`, except `NOT`) write `XSET_FL`; `SETcc` and `RCL`/`RCR` read
-  it; `MOVS`/`STOS`/`LODS`/`INS`/`OUTS` touch no flags.
+  group 3 (`F6`/`F7`, except `NOT`) write `XSET_FL`; `SETcc`, `Jcc` and
+  `RCL`/`RCR` read it; `MOVS`/`STOS`/`LODS`/`INS`/`OUTS` touch no flags.
+- Control transfers report what they touch: `Jcc` reads `XSET_FL`,
+  `LOOP`/`LOOPE`/`LOOPNE` read and write `CX`/`ECX`/`RCX` (and `LOOPE`/`LOOPNE`
+  read `XSET_FL`), `JCXZ` reads the count, and a relative `JMP` reads and
+  writes nothing. `CALL`, `RET`, far `JMP`/`IRET`, `INT` and x87 keep
+  `XSET_UNDEF`, because their effects (callee clobbers, segment loads, x87
+  state) are not modelled.
 
 Original XDE 1.02 is 32-bit only and marks most SSE `0F` opcodes as errors.
 This tree is the version to use for x86-64 and SIMD encodings.

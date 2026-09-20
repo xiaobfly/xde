@@ -144,7 +144,8 @@ m0[0x6E] = XA_BAD  # OUTS
 m0[0x6F] = XA_BAD
 
 for i in rng(0x70, 0x7F):
-    fl = IMM_IB | XA_REL | XA_F64 | XA_JCC | XA_UNDEF
+    # Jcc reads FL and nothing else is unknown, so no XA_UNDEF here.
+    fl = IMM_IB | XA_REL | XA_F64 | XA_JCC
     if i in (0x70, 0x71, 0x7A, 0x7B):
         fl |= XA_BAD
     m0[i] = fl
@@ -228,18 +229,19 @@ m0[0xD7] = XA_BAD | XA_OPSZ8  # XLAT
 for i in rng(0xD8, 0xDF):
     m0[i] = XA_MODRM | XA_UNDEF  # x87
 
+# LOOP/LOOPE/LOOPNE/JCXZ: only the counter and (for E0/E1) ZF are involved
 for i in (0xE0, 0xE1):
-    m0[i] = IMM_IB | XA_REL | XA_F64 | XA_UNDEF | XA_BAD
-m0[0xE2] = IMM_IB | XA_REL | XA_F64 | XA_UNDEF
-m0[0xE3] = IMM_IB | XA_REL | XA_F64 | XA_UNDEF
+    m0[i] = IMM_IB | XA_REL | XA_F64 | XA_BAD
+m0[0xE2] = IMM_IB | XA_REL | XA_F64
+m0[0xE3] = IMM_IB | XA_REL | XA_F64
 m0[0xE4] = IMM_IB | XA_OPSZ8 | XA_BAD
 m0[0xE5] = IMM_IB | XA_BAD
 m0[0xE6] = IMM_IB | XA_OPSZ8 | XA_BAD
 m0[0xE7] = IMM_IB | XA_BAD
 m0[0xE8] = IMM_IZ | XA_REL | XA_F64 | XA_CALL | XA_UNDEF
-m0[0xE9] = IMM_IZ | XA_REL | XA_F64 | XA_JMP | XA_STOP | XA_UNDEF
+m0[0xE9] = IMM_IZ | XA_REL | XA_F64 | XA_JMP | XA_STOP
 m0[0xEA] = IMM_AP | XA_I64 | XA_JMP | XA_STOP | XA_BAD | XA_UNDEF
-m0[0xEB] = IMM_IB | XA_REL | XA_F64 | XA_JMP | XA_STOP | XA_UNDEF
+m0[0xEB] = IMM_IB | XA_REL | XA_F64 | XA_JMP | XA_STOP
 m0[0xEC] = XA_OPSZ8 | XA_BAD
 m0[0xED] = XA_BAD
 m0[0xEE] = XA_OPSZ8 | XA_BAD
@@ -324,7 +326,7 @@ for i in rng(0x78, 0x7F):
     m1[i] = XA_MODRM
 
 for i in rng(0x80, 0x8F):
-    m1[i] = IMM_IZ | XA_REL | XA_F64 | XA_JCC | XA_UNDEF
+    m1[i] = IMM_IZ | XA_REL | XA_F64 | XA_JCC  # FL read, nothing unknown
 
 for i in rng(0x90, 0x9F):
     m1[i] = XA_MODRM | XA_OPSZ8  # SETcc; FL read is in apply_usage_special
