@@ -308,18 +308,21 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         diza->enc == XDE_ENC_EVEX || diza->enc == XDE_ENC_XOP) {
         diza->src_set |= XSET_OTHER;
         diza->dst_set |= XSET_OTHER;
-        if (diza->vex_vvvv != 0 && diza->vex_vvvv != 0xF) {
-            if (attr & XA_VVVV_GPR) {
-                uint64_t v2 = 0;
-                diza->src_set |= gp_set(dsz, diza->vex_vvvv, 1, &v2);
-                diza->src_set2 |= v2;
-            } else {
-                diza->src_set |= XSET_OTHER;
-            }
+        if (attr & XA_VVVV_GPR) {
+            // vvvv always names a GPR here, 0 included (that is EAX). The
+            // 0/0xF skip below only applies to vector operands, where those
+            // values encode "no vvvv".
+            uint64_t v2 = 0;
+            diza->src_set |= gp_set(dsz, diza->vex_vvvv, 1, &v2);
+            diza->src_set2 |= v2;
+        } else if (diza->vex_vvvv != 0 && diza->vex_vvvv != 0xF) {
+            diza->src_set |= XSET_OTHER;
         }
     }
 
-    if (c == 0x8B || c == 0x8A || c == 0x8D ||
+    // XA_VVVV_GPR marks a VEX/EVEX/XOP instruction whose reg field is a
+    // destination register, which the 0F-map list below cannot see.
+    if (c == 0x8B || c == 0x8A || c == 0x8D || (attr & XA_VVVV_GPR) ||
         (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF ||
                        (c2 >= 0x40 && c2 <= 0x4F) || c2 == 0xAF || c2 == 0xBC || c2 == 0xBD ||
                        c2 == 0xB8))) {

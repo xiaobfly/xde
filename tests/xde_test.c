@@ -925,6 +925,125 @@ int main(void)
         }
     }
 
+    // Implicit operands: strings, conversions, segment and port I/O.
+    {
+        static const uint8_t lodsb[] = { 0xAC };
+        static const uint8_t stosb[] = { 0xAA };
+        static const uint8_t insb[] = { 0x6C };
+        static const uint8_t outsb[] = { 0x6E };
+        expect_set("lodsb src RSI", 64, lodsb, 1, 0, XSET_RSI, 1);
+        expect_set("lodsb dst RSI", 64, lodsb, 1, 1, XSET_RSI, 1);
+        expect_set("stosb src RDI", 64, stosb, 1, 0, XSET_RDI, 1);
+        expect_set("stosb dst RDI", 64, stosb, 1, 1, XSET_RDI, 1);
+        expect_set("insb src RDI", 64, insb, 1, 0, XSET_RDI, 1);
+        expect_set("insb src DEV", 64, insb, 1, 0, XSET_DEV, 1);
+        expect_set("insb src DX", 64, insb, 1, 0, XSET_DX, 1);
+        expect_set("outsb src RSI", 64, outsb, 1, 0, XSET_RSI, 1);
+        expect_set("outsb src DEV", 64, outsb, 1, 0, XSET_DEV, 1);
+    }
+    {
+        static const uint8_t cbw[] = { 0x66, 0x98 };
+        static const uint8_t cwde[] = { 0x98 };
+        static const uint8_t cdqe[] = { 0x48, 0x98 };
+        static const uint8_t cwd[] = { 0x66, 0x99 };
+        static const uint8_t cqo[] = { 0x48, 0x99 };
+        expect_set("cbw src AL", 64, cbw, 2, 0, XSET_AL, 1);
+        expect_set("cbw dst AX", 64, cbw, 2, 1, XSET_AX, 1);
+        expect_set("cwde src AX", 64, cwde, 1, 0, XSET_AX, 1);
+        expect_set("cwde dst EAX", 64, cwde, 1, 1, XSET_EAX, 1);
+        expect_set("cdqe src EAX", 64, cdqe, 2, 0, XSET_EAX, 1);
+        expect_set("cdqe dst RAX", 64, cdqe, 2, 1, XSET_RAX, 1);
+        expect_set("cwd src AX", 64, cwd, 2, 0, XSET_AX, 1);
+        expect_set("cwd dst DX", 64, cwd, 2, 1, XSET_DX, 1);
+        expect_set("cqo src RAX", 64, cqo, 2, 0, XSET_RAX, 1);
+        expect_set("cqo dst RDX", 64, cqo, 2, 1, XSET_RDX, 1);
+    }
+    {
+        static const uint8_t aaa[] = { 0x37 };
+        static const uint8_t aam[] = { 0xD4, 0x0A };
+        static const uint8_t aad[] = { 0xD5, 0x0A };
+        static const uint8_t popa32[] = { 0x61 };
+        static const uint8_t push_es[] = { 0x06 };
+        static const uint8_t pop_es[] = { 0x07 };
+        static const uint8_t xlat[] = { 0xD7 };
+        static const uint8_t enter[] = { 0xC8, 0x00, 0x00, 0x00 };
+        expect_set("aaa (32) src AH", 32, aaa, 1, 0, XSET_AH, 1);
+        expect_set("aaa (32) dst AH", 32, aaa, 1, 1, XSET_AH, 1);
+        expect_set("aam src AL", 32, aam, 2, 0, XSET_AL, 1);
+        expect_set("aam dst AX", 32, aam, 2, 1, XSET_AX, 1);
+        expect_set("aad src AX", 32, aad, 2, 0, XSET_AX, 1);
+        expect_set("popa (32) dst EAX", 32, popa32, 1, 1, XSET_EAX, 1);
+        expect_set("popa (32) dst EDI", 32, popa32, 1, 1, XSET_EDI, 1);
+        expect_set("push es (16) src other", 16, push_es, 1, 0, XSET_OTHER, 1);
+        expect_set("pop es (16) dst other", 16, pop_es, 1, 1, XSET_OTHER, 1);
+        expect_set("xlat src RBX", 64, xlat, 1, 0, XSET_RBX, 1);
+        expect_set("enter src RSP", 64, enter, 4, 0, XSET_RSP, 1);
+        expect_set("enter dst RBP", 64, enter, 4, 1, XSET_RBP, 1);
+    }
+    // 0F-map implicit operands, and a VEX vvvv that names a GPR.
+    {
+        static const uint8_t push_fs[] = { 0x0F, 0xA0 };
+        static const uint8_t pop_fs[] = { 0x0F, 0xA1 };
+        static const uint8_t shld_cl[] = { 0x0F, 0xA5, 0xC1 };
+        static const uint8_t andn[] = { 0xC4, 0xE2, 0x78, 0xF2, 0xC1 };
+        expect_set("push fs src other", 64, push_fs, 2, 0, XSET_OTHER, 1);
+        expect_set("pop fs dst other", 64, pop_fs, 2, 1, XSET_OTHER, 1);
+        expect_set("shld eax,ecx,cl src CL", 64, shld_cl, 3, 0, XSET_CL, 1);
+        expect_set("andn src vvvv EAX", 64, andn, 5, 0, XSET_EAX, 1);
+        expect_set("andn src rm ECX", 64, andn, 5, 0, XSET_ECX, 1);
+        expect_set("andn dst reg EAX", 64, andn, 5, 1, XSET_EAX, 1);
+        {
+            static const uint8_t bextr[] = { 0x8F, 0xEA, 0x78, 0x10, 0xC1, 0x01, 0, 0, 0 };
+            static const uint8_t sarx[] = { 0xC4, 0xE2, 0x7A, 0xF7, 0xC1 };
+            expect_set("bextr dst reg EAX", 64, bextr, 9, 1, XSET_EAX, 1);
+            expect_set("bextr src rm ECX", 64, bextr, 9, 0, XSET_ECX, 1);
+            expect_set("bextr src vvvv EAX", 64, bextr, 9, 0, XSET_EAX, 1);
+            expect_set("sarx dst reg EAX", 64, sarx, 5, 1, XSET_EAX, 1);
+            expect_set("sarx src rm ECX", 64, sarx, 5, 0, XSET_ECX, 1);
+            expect_set("sarx src vvvv EAX", 64, sarx, 5, 0, XSET_EAX, 1);
+        }
+    }
+    // Addressing forms: SIB with an index, without one, and disp32 no base.
+    {
+        static const uint8_t sib_idx[] = { 0x8B, 0x04, 0x48 };
+        static const uint8_t sib_noidx[] = { 0x8B, 0x04, 0x20 };
+        static const uint8_t sib_nobase[] = { 0x8B, 0x04, 0x25, 0, 0, 0, 0 };
+        expect_set("sib index src RAX", 64, sib_idx, 3, 0, XSET_RAX, 1);
+        expect_set("sib index src RCX", 64, sib_idx, 3, 0, XSET_RCX, 1);
+        expect_set("sib no index src RAX", 64, sib_noidx, 3, 0, XSET_RAX, 1);
+        expect_set("sib no index (no RCX)", 64, sib_noidx, 3, 0, XSET_RCX, 0);
+        expect_set("sib no base src M", 64, sib_nobase, 7, 0, XSET_MEM, 1);
+        expect_set("sib no base (no RAX)", 64, sib_nobase, 7, 0, XSET_RAX, 0);
+    }
+    // Opcode-embedded registers and the implicit accumulator rules.
+    {
+        static const uint8_t bswap[] = { 0x0F, 0xC8 };
+        static const uint8_t xchg[] = { 0x91 };
+        static const uint8_t movb[] = { 0xB0, 0x12 };
+        static const uint8_t movdi[] = { 0xBF, 0x01, 0, 0, 0 };
+        static const uint8_t addal[] = { 0x04, 0x12 };
+        static const uint8_t addeax[] = { 0x05, 0x01, 0, 0, 0 };
+        static const uint8_t mul[] = { 0xF7, 0xE0 };
+        static const uint8_t inc32b[] = { 0x40 };
+        expect_set("bswap eax src EAX", 64, bswap, 2, 0, XSET_EAX, 1);
+        expect_set("bswap eax dst EAX", 64, bswap, 2, 1, XSET_EAX, 1);
+        expect_set("xchg ecx,eax src EAX", 64, xchg, 1, 0, XSET_EAX, 1);
+        expect_set("xchg ecx,eax src ECX", 64, xchg, 1, 0, XSET_ECX, 1);
+        expect_set("xchg ecx,eax dst ECX", 64, xchg, 1, 1, XSET_ECX, 1);
+        expect_set("mov al,imm dst AL", 64, movb, 2, 1, XSET_AL, 1);
+        expect_set("mov edi,imm dst EDI", 64, movdi, 5, 1, XSET_EDI, 1);
+        expect_set("add al,imm src AL", 64, addal, 2, 0, XSET_AL, 1);
+        expect_set("add al,imm dst FL", 64, addal, 2, 1, XSET_FL, 1);
+        expect_set("add eax,imm src EAX", 64, addeax, 5, 0, XSET_EAX, 1);
+        expect_set("add eax,imm dst FL", 64, addeax, 5, 1, XSET_FL, 1);
+        expect_set("mul eax src EAX", 64, mul, 2, 0, XSET_EAX, 1);
+        expect_set("mul eax dst EDX", 64, mul, 2, 1, XSET_EDX, 1);
+        expect_set("mul eax dst FL", 64, mul, 2, 1, XSET_FL, 1);
+        expect_set("inc eax (32) src EAX", 32, inc32b, 1, 0, XSET_EAX, 1);
+        expect_set("inc eax (32) dst EAX", 32, inc32b, 1, 1, XSET_EAX, 1);
+        expect_set("inc eax (32) dst FL", 32, inc32b, 1, 1, XSET_FL, 1);
+    }
+
     // 16-bit
     {
         static const uint8_t add16[] = { 0x01, 0xC0 };
