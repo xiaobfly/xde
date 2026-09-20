@@ -3,7 +3,18 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "VCVARS="
-if exist "%ProgramFiles%\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Build\vcvars64.bat" (
+
+rem Preferred: ask the VS installer (any edition/version, incl. prerelease).
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" (
+  for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul`) do (
+    set "VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
+  )
+)
+if defined VCVARS if not exist "%VCVARS%" set "VCVARS="
+
+rem Fallback: explicit well-known install locations.
+if not defined VCVARS if exist "%ProgramFiles%\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Build\vcvars64.bat" (
   set "VCVARS=%ProgramFiles%\Microsoft Visual Studio\18\Insiders\VC\Auxiliary\Build\vcvars64.bat"
 )
 if not defined VCVARS if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
