@@ -1171,6 +1171,180 @@ int main(void)
         }
     }
 
+    // System groups: CR/DR moves, RDRAND/RDSEED, fences, FS/GS base, save/restore, prefetch.
+    {
+        // 0F 20-23: the reg field names the CR/DR operand, r/m names the GPR.
+        // 0F 20/21 move CR/DR into r/m, 0F 22/23 move r/m into CR/DR.
+        static const uint8_t mov_eax_cr0[] = { 0x0F, 0x20, 0xC0 };
+        static const uint8_t mov_eax_dr0[] = { 0x0F, 0x21, 0xC0 };
+        static const uint8_t mov_cr0_eax[] = { 0x0F, 0x22, 0xC0 };
+        static const uint8_t mov_dr0_eax[] = { 0x0F, 0x23, 0xC0 };
+        static const uint8_t mov_rax_cr0[] = { 0x48, 0x0F, 0x20, 0xC0 };
+        expect_set("mov eax,cr0 (no src RAX)", 64, mov_eax_cr0, 3, 0, XSET_RAX, 0);
+        expect_set("mov eax,cr0 src other", 64, mov_eax_cr0, 3, 0, XSET_OTHER, 1);
+        expect_set("mov eax,cr0 dst RAX", 64, mov_eax_cr0, 3, 1, XSET_RAX, 1);
+        expect_set("mov eax,dr0 (no src RAX)", 64, mov_eax_dr0, 3, 0, XSET_RAX, 0);
+        expect_set("mov eax,dr0 src other", 64, mov_eax_dr0, 3, 0, XSET_OTHER, 1);
+        expect_set("mov eax,dr0 dst RAX", 64, mov_eax_dr0, 3, 1, XSET_RAX, 1);
+        expect_set("mov cr0,eax src RAX", 64, mov_cr0_eax, 3, 0, XSET_RAX, 1);
+        expect_set("mov cr0,eax dst other", 64, mov_cr0_eax, 3, 1, XSET_OTHER, 1);
+        expect_set("mov cr0,eax (no dst RAX)", 64, mov_cr0_eax, 3, 1, XSET_RAX, 0);
+        expect_set("mov dr0,eax src RAX", 64, mov_dr0_eax, 3, 0, XSET_RAX, 1);
+        expect_set("mov dr0,eax dst other", 64, mov_dr0_eax, 3, 1, XSET_OTHER, 1);
+        expect_set("mov rax,cr0 dst RAX", 64, mov_rax_cr0, 4, 1, XSET_RAX, 1);
+    }
+    {
+        // 0F C7 /6 /7 mod=3: RDRAND/RDSEED, r/m is a plain GPR destination
+        // and there is no source operand.
+        static const uint8_t rdrand[] = { 0x0F, 0xC7, 0xF0 };
+        static const uint8_t rdseed[] = { 0x0F, 0xC7, 0xF8 };
+        static const uint8_t rdrand64[] = { 0x48, 0x0F, 0xC7, 0xF0 };
+        expect_set("rdrand eax dst EAX", 64, rdrand, 3, 1, XSET_EAX, 1);
+        expect_set("rdrand (no src other)", 64, rdrand, 3, 0, XSET_OTHER, 0);
+        expect_set("rdrand (no dst other)", 64, rdrand, 3, 1, XSET_OTHER, 0);
+        expect_set("rdseed eax dst EAX", 64, rdseed, 3, 1, XSET_EAX, 1);
+        expect_set("rdseed (no src other)", 64, rdseed, 3, 0, XSET_OTHER, 0);
+        expect_set("rdseed (no dst other)", 64, rdseed, 3, 1, XSET_OTHER, 0);
+        expect_set("rdrand rax dst RAX", 64, rdrand64, 4, 1, XSET_RAX, 1);
+        expect_set("rdrand rax (no src other)", 64, rdrand64, 4, 0, XSET_OTHER, 0);
+    }
+    {
+        // 0F AE mod=3: /5 /6 /7 are LFENCE/MFENCE/SFENCE and take no operand
+        // at all; F3 0F AE /0-/3 is the FS/GS base group, where r/m is a GPR.
+        static const uint8_t lfence[] = { 0x0F, 0xAE, 0xE8 };
+        static const uint8_t mfence[] = { 0x0F, 0xAE, 0xF0 };
+        static const uint8_t sfence[] = { 0x0F, 0xAE, 0xF8 };
+        static const uint8_t rdfsbase[] = { 0xF3, 0x0F, 0xAE, 0xC0 };
+        static const uint8_t rdgsbase[] = { 0xF3, 0x0F, 0xAE, 0xC8 };
+        static const uint8_t wrfsbase[] = { 0xF3, 0x0F, 0xAE, 0xD0 };
+        static const uint8_t wrgsbase[] = { 0xF3, 0x0F, 0xAE, 0xD8 };
+        expect_set("lfence (no src other)", 64, lfence, 3, 0, XSET_OTHER, 0);
+        expect_set("lfence (no dst other)", 64, lfence, 3, 1, XSET_OTHER, 0);
+        expect_set("mfence (no src other)", 64, mfence, 3, 0, XSET_OTHER, 0);
+        expect_set("mfence (no dst other)", 64, mfence, 3, 1, XSET_OTHER, 0);
+        expect_set("sfence (no src other)", 64, sfence, 3, 0, XSET_OTHER, 0);
+        expect_set("sfence (no dst other)", 64, sfence, 3, 1, XSET_OTHER, 0);
+        expect_set("rdfsbase dst RAX", 64, rdfsbase, 4, 1, XSET_RAX, 1);
+        expect_set("rdfsbase (no src other)", 64, rdfsbase, 4, 0, XSET_OTHER, 0);
+        expect_set("rdgsbase dst RAX", 64, rdgsbase, 4, 1, XSET_RAX, 1);
+        expect_set("rdgsbase (no src other)", 64, rdgsbase, 4, 0, XSET_OTHER, 0);
+        expect_set("wrfsbase src RAX", 64, wrfsbase, 4, 0, XSET_RAX, 1);
+        expect_set("wrfsbase (no src other)", 64, wrfsbase, 4, 0, XSET_OTHER, 0);
+        expect_set("wrfsbase dst other", 64, wrfsbase, 4, 1, XSET_OTHER, 1);
+        expect_set("wrgsbase src RAX", 64, wrgsbase, 4, 0, XSET_RAX, 1);
+        expect_set("wrgsbase (no src other)", 64, wrgsbase, 4, 0, XSET_OTHER, 0);
+        expect_set("wrgsbase dst other", 64, wrgsbase, 4, 1, XSET_OTHER, 1);
+    }
+    {
+        // Memory forms that store into their r/m operand, plus the read-only
+        // siblings that must stay source-only.
+        static const uint8_t fxsave[] = { 0x0F, 0xAE, 0x00 };
+        static const uint8_t stmxcsr[] = { 0x0F, 0xAE, 0x18 };
+        static const uint8_t xsave[] = { 0x0F, 0xAE, 0x20 };
+        static const uint8_t xsaveopt[] = { 0x0F, 0xAE, 0x30 };
+        static const uint8_t clwb[] = { 0x66, 0x0F, 0xAE, 0x30 };
+        static const uint8_t cmpxchg8b[] = { 0x0F, 0xC7, 0x08 };
+        static const uint8_t cmpxchg16b[] = { 0x48, 0x0F, 0xC7, 0x08 };
+        static const uint8_t xrstors[] = { 0x0F, 0xC7, 0x18 };
+        static const uint8_t xsavec[] = { 0x0F, 0xC7, 0x20 };
+        static const uint8_t xsaves[] = { 0x0F, 0xC7, 0x28 };
+        expect_set("fxsave dst M", 64, fxsave, 3, 1, XSET_MEM, 1);
+        expect_set("fxsave src M", 64, fxsave, 3, 0, XSET_MEM, 1);
+        expect_set("stmxcsr dst M", 64, stmxcsr, 3, 1, XSET_MEM, 1);
+        expect_set("xsave dst M", 64, xsave, 3, 1, XSET_MEM, 1);
+        expect_set("xsaveopt dst M", 64, xsaveopt, 3, 1, XSET_MEM, 1);
+        expect_set("clwb dst M", 64, clwb, 4, 1, XSET_MEM, 1);
+        expect_set("cmpxchg8b dst M", 64, cmpxchg8b, 3, 1, XSET_MEM, 1);
+        expect_set("cmpxchg8b src M", 64, cmpxchg8b, 3, 0, XSET_MEM, 1);
+        expect_set("cmpxchg16b dst M", 64, cmpxchg16b, 4, 1, XSET_MEM, 1);
+        expect_set("xrstors dst M", 64, xrstors, 3, 1, XSET_MEM, 1);
+        expect_set("xsavec dst M", 64, xsavec, 3, 1, XSET_MEM, 1);
+        expect_set("xsaves dst M", 64, xsaves, 3, 1, XSET_MEM, 1);
+        {
+            static const uint8_t fxrstor[] = { 0x0F, 0xAE, 0x08 };
+            static const uint8_t ldmxcsr[] = { 0x0F, 0xAE, 0x10 };
+            static const uint8_t xrstor[] = { 0x0F, 0xAE, 0x28 };
+            static const uint8_t vmptrld[] = { 0x0F, 0xC7, 0x30 };
+            static const uint8_t vmptrst[] = { 0x0F, 0xC7, 0x38 };
+            expect_set("fxrstor (no dst M)", 64, fxrstor, 3, 1, XSET_MEM, 0);
+            expect_set("ldmxcsr (no dst M)", 64, ldmxcsr, 3, 1, XSET_MEM, 0);
+            expect_set("xrstor (no dst M)", 64, xrstor, 3, 1, XSET_MEM, 0);
+            expect_set("vmptrld (no dst M)", 64, vmptrld, 3, 1, XSET_MEM, 0);
+            expect_set("vmptrst (no dst M)", 64, vmptrst, 3, 1, XSET_MEM, 0);
+        }
+    }
+    {
+        // 0F 18 /0-/3 and 0F 0D /0 read memory and name no register operand;
+        // 0F 18 /4-/7, 0F 19, 0F 1D and 0F 1F are NOPs and access nothing.
+        static const uint8_t prefetchnta[] = { 0x0F, 0x18, 0x00 };
+        static const uint8_t prefetcht0[] = { 0x0F, 0x18, 0x08 };
+        static const uint8_t prefetcht1[] = { 0x0F, 0x18, 0x10 };
+        static const uint8_t prefetcht2[] = { 0x0F, 0x18, 0x18 };
+        static const uint8_t nop18_4[] = { 0x0F, 0x18, 0x20 };
+        static const uint8_t prefetchw[] = { 0x0F, 0x0D, 0x00 };
+        static const uint8_t nop19[] = { 0x0F, 0x19, 0x00 };
+        static const uint8_t nop1d[] = { 0x0F, 0x1D, 0x00 };
+        static const uint8_t nop1f[] = { 0x0F, 0x1F, 0x00 };
+        static const uint8_t endbr64[] = { 0xF3, 0x0F, 0x1E, 0xFA };
+        expect_set("prefetchnta src M", 64, prefetchnta, 3, 0, XSET_MEM, 1);
+        expect_set("prefetchnta (no src other)", 64, prefetchnta, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetchnta (no dst other)", 64, prefetchnta, 3, 1, XSET_OTHER, 0);
+        expect_set("prefetcht0 (no src other)", 64, prefetcht0, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetcht1 (no src other)", 64, prefetcht1, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetcht2 (no src other)", 64, prefetcht2, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetchw src M", 64, prefetchw, 3, 0, XSET_MEM, 1);
+        expect_set("prefetchw (no src other)", 64, prefetchw, 3, 0, XSET_OTHER, 0);
+        expect_set("nop Ev (no src M)", 64, nop1f, 3, 0, XSET_MEM, 0);
+        expect_set("nop Ev (no src other)", 64, nop1f, 3, 0, XSET_OTHER, 0);
+        expect_set("nop Ev (no dst other)", 64, nop1f, 3, 1, XSET_OTHER, 0);
+        expect_set("nop Ev (no dst M)", 64, nop1f, 3, 1, XSET_MEM, 0);
+        expect_set("0F 19 nop (no src M)", 64, nop19, 3, 0, XSET_MEM, 0);
+        expect_set("0F 19 nop (no src other)", 64, nop19, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 1D nop (no src M)", 64, nop1d, 3, 0, XSET_MEM, 0);
+        expect_set("0F 1D nop (no src other)", 64, nop1d, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 18 /4 nop (no src M)", 64, nop18_4, 3, 0, XSET_MEM, 0);
+        expect_set("0F 18 /4 nop (no src other)", 64, nop18_4, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 18 /4 nop (no dst other)", 64, nop18_4, 3, 1, XSET_OTHER, 0);
+        expect_set("endbr64 (no src other)", 64, endbr64, 4, 0, XSET_OTHER, 0);
+        expect_set("endbr64 (no dst other)", 64, endbr64, 4, 1, XSET_OTHER, 0);
+    }
+    {
+        // 0F B2/B4/B5 LSS/LFS/LGS write a GPR and read a segment + memory.
+        static const uint8_t lss[] = { 0x0F, 0xB2, 0x00 };
+        static const uint8_t lfs[] = { 0x0F, 0xB4, 0x00 };
+        static const uint8_t lgs[] = { 0x0F, 0xB5, 0x00 };
+        static const uint8_t movzx[] = { 0x0F, 0xB6, 0x00 };
+        expect_set("lss eax,[rax] dst RAX", 64, lss, 3, 1, XSET_RAX, 1);
+        expect_set("lss eax,[rax] dst other", 64, lss, 3, 1, XSET_OTHER, 1);
+        expect_set("lss eax,[rax] src M", 64, lss, 3, 0, XSET_MEM, 1);
+        expect_set("lfs eax,[rax] dst RAX", 64, lfs, 3, 1, XSET_RAX, 1);
+        expect_set("lgs eax,[rax] dst RAX", 64, lgs, 3, 1, XSET_RAX, 1);
+        expect_set("movzx eax,[rax] dst RAX", 64, movzx, 3, 1, XSET_RAX, 1);
+    }
+    {
+        // C7 F8 / C6 F8 are XBEGIN / XABORT, not the group's r/m forms, so the
+        // C_BAD that guards reg != 0 must not fire for /7.
+        static const uint8_t xbegin[] = { 0xC7, 0xF8, 0x00, 0x00, 0x00, 0x00 };
+        static const uint8_t xabort[] = { 0xC6, 0xF8, 0x00 };
+        static const uint8_t xbegin_bad[] = { 0xC7, 0xFA, 0x00, 0x00, 0x00, 0x00 };
+        static const uint8_t xabort_bad[] = { 0xC6, 0xFA, 0x00 };
+        static const uint8_t mov_store[] = { 0xC7, 0x04, 0x24, 0x00, 0x00, 0x00, 0x00 };
+        expect_flag("xbegin not bad", 64, xbegin, 6, C_BAD, 0);
+        expect_flag("xabort not bad", 64, xabort, 3, C_BAD, 0);
+        expect_flag("mov [rsp],imm32 not bad", 64, mov_store, 7, C_BAD, 0);
+        // Only the F8 ModR/M is XBEGIN/XABORT; every other /7 stays invalid.
+        expect_flag("C7 FA still bad", 64, xbegin_bad, 6, C_BAD, 1);
+        expect_flag("C6 FA still bad", 64, xabort_bad, 3, C_BAD, 1);
+    }
+    {
+        // 0F 00 / 0F 01 keep the whole-set XA_UNDEF model, so their sets stay
+        // unassertable; C_UNDEF is the only observable anchor.
+        static const uint8_t sldt[] = { 0x0F, 0x00, 0xC0 };
+        static const uint8_t smsw[] = { 0x0F, 0x01, 0xE0 };
+        expect_flag("0F 00 undef", 64, sldt, 3, C_UNDEF, 1);
+        expect_flag("0F 01 undef", 64, smsw, 3, C_UNDEF, 1);
+    }
+
     // 16-bit
     {
         static const uint8_t add16[] = { 0x01, 0xC0 };

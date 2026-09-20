@@ -327,6 +327,54 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                      c2 == 0xBE || c2 == 0xBF || c2 == 0xC0 || c2 == 0xC1 ||
                      c2 == 0xC3 || (c2 >= 0x40 && c2 <= 0x4F) ||
                      (c2 >= 0x90 && c2 <= 0x9F)));
+    // The 0F groups below keep an instruction selector in the reg field
+    // instead of a register operand, so the generic reg rule above and the
+    // generic mod==3 / memory rules below must be told to stand aside.
+    // 0F 20-23 MOV to/from CR/DR: r/m is always a GPR; /20 /21 read CR/DR into
+    // it, /22 /23 write it into CR/DR, which folds into OTHER.
+    int mov_crdr = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                    c2 >= 0x20 && c2 <= 0x23);
+    // 0F C7 /6 /7 with mod=3 is RDRAND/RDSEED: r/m is a plain GPR destination
+    // and there is no source operand. The mod!=3 forms of /6 /7 are
+    // VMPTRLD/VMPTRST and keep the generic memory path.
+    int rdrand = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                  c2 == 0xC7 && mod == 3 && (reg == 6 || reg == 7));
+    // 0F AE with mod=3: /5 /6 /7 are LFENCE/MFENCE/SFENCE, which take no
+    // operand at all, and /0-/3 with the F3 prefix are the FS/GS base moves,
+    // whose r/m is a GPR.
+    int fence = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                 c2 == 0xAE && mod == 3 && reg >= 5);
+    int fsgsbase = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                    c2 == 0xAE && mod == 3 && reg <= 3 &&
+                    diza->p_rep == 0xF3);
+    // F3 0F 1E FA/FB is ENDBR64/ENDBR32: no operands at all.
+    int endbr = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                 c2 == 0x1E && mod == 3 && reg == 7 && diza->p_rep == 0xF3);
+    // 0F 18 /4-/7, 0F 19, 0F 1D and 0F 1F are NOPs: their r/m operand is not
+    // accessed (parse_modrm still records the address registers). 0F 18 /0-/3
+    // (PREFETCHNTA/PREFETCHT0/T1/T2) and 0F 0D /0 (PREFETCHW) do read memory
+    // but name no register operand either.
+    int nop_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                  mod != 3 &&
+                  (c2 == 0x19 || c2 == 0x1D || c2 == 0x1F ||
+                   (c2 == 0x18 && reg >= 4)));
+    int prefetch_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                       mod != 3 &&
+                       ((c2 == 0x18 && reg <= 3) || (c2 == 0x0D && reg == 0)));
+    // Memory forms that store into their r/m operand: 0F AE /0 /3 /4 /6
+    // (FXSAVE, STMXCSR, XSAVE, XSAVEOPT, and CLWB which is /6 with a 66
+    // prefix) and 0F C7 /1 /3 /4 /5 (CMPXCHG8B/16B, XRSTORS, XSAVEC,
+    // XSAVES). Their read-only siblings FXRSTOR /1, LDMXCSR /2, XRSTOR /5,
+    // VMPTRLD /6 and VMPTRST /7 stay source-only.
+    int mem_store = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                     mod != 3 &&
+                     ((c2 == 0xAE &&
+                       (reg == 0 || reg == 3 || reg == 4 || reg == 6)) ||
+                      (c2 == 0xC7 &&
+                       (reg == 1 || reg == 3 || reg == 4 || reg == 5))));
+    // Forms whose reg field is not a register operand at all.
+    int reg_not_dst = rdrand || fence || fsgsbase || endbr || nop_ea ||
+                      prefetch_ea;
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -352,8 +400,9 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // XA_VVVV_GPR marks a VEX/EVEX/XOP instruction whose reg field is a
     // destination register, which the 0F-map list below cannot see.
     if (c == 0x8B || c == 0x8A || c == 0x8D || (attr & XA_VVVV_GPR) || reg_dst ||
-        simd_0f ||
-        (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF ||
+        (simd_0f && !reg_not_dst) ||
+        (c == 0x0F && (c2 == 0xB2 || c2 == 0xB4 || c2 == 0xB5 ||
+                       c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF ||
                        (c2 >= 0x40 && c2 <= 0x4F) || c2 == 0xAF || c2 == 0xBC || c2 == 0xBD ||
                        c2 == 0xB8))) {
         if (simd_0f) {
@@ -395,29 +444,59 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         uint64_t rset = gp_set(sz, rmreg, rex, &rset2);
         if (diza->mode == 64 && sz == 4)
             rset = gp_set(8, rmreg, rex, &rset2);
-        if (simd_0f ||
+        if ((simd_0f && !reg_not_dst) ||
             (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2 &&
              !(attr & XA_VVVV_GPR))) {
             rset = XSET_OTHER;
             rset2 = 0;
         }
-        // MOV store forms (88/89, C6/C7) and SETcc only write their r/m
-        // operand, so it must not land in src_set; other forms read it.
-        if (!setcc && c != 0x8D && c != 0x88 && c != 0x89 &&
-            c != 0xC6 && c != 0xC7) {
-            diza->src_set |= rset;
-            diza->src_set2 |= rset2;
-        }
-        // dest of r/m for ALU, MOV r/m, shifts, SETcc, etc.
-        if (setcc ||
-            (diza->map == XDE_MAP_LEGACY &&
-             ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
-              c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
-              (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
-              c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
-              c == 0xC6 || c == 0xC7))) {
+        if (mov_crdr) {
+            // 0F 20/21 read CR/DR into r/m, 0F 22/23 write r/m into CR/DR.
+            if (c2 == 0x20 || c2 == 0x21) {
+                diza->src_set |= XSET_OTHER;
+                diza->dst_set |= rset;
+                diza->dst_set2 |= rset2;
+            } else {
+                diza->src_set |= rset;
+                diza->src_set2 |= rset2;
+                diza->dst_set |= XSET_OTHER;
+            }
+        } else if (rdrand) {
+            // RDRAND/RDSEED write r/m and read nothing.
             diza->dst_set |= rset;
             diza->dst_set2 |= rset2;
+        } else if (fsgsbase) {
+            // RDFSBASE/RDGSBASE write r/m; WRFSBASE/WRGSBASE read it and write
+            // the FS/GS base register, which folds into OTHER.
+            if (reg <= 1) {
+                diza->dst_set |= rset;
+                diza->dst_set2 |= rset2;
+            } else {
+                diza->src_set |= rset;
+                diza->src_set2 |= rset2;
+                diza->dst_set |= XSET_OTHER;
+            }
+        } else if (fence || endbr) {
+            // LFENCE/MFENCE/SFENCE and ENDBR64/ENDBR32 take no operand.
+        } else {
+            // MOV store forms (88/89, C6/C7) and SETcc only write their r/m
+            // operand, so it must not land in src_set; other forms read it.
+            if (!setcc && c != 0x8D && c != 0x88 && c != 0x89 &&
+                c != 0xC6 && c != 0xC7) {
+                diza->src_set |= rset;
+                diza->src_set2 |= rset2;
+            }
+            // dest of r/m for ALU, MOV r/m, shifts, SETcc, etc.
+            if (setcc ||
+                (diza->map == XDE_MAP_LEGACY &&
+                 ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
+                  c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
+                  (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
+                  c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
+                  c == 0xC6 || c == 0xC7))) {
+                diza->dst_set |= rset;
+                diza->dst_set2 |= rset2;
+            }
         }
         if (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF)) {
             int srcsz = (c2 == 0xB6 || c2 == 0xBE) ? 1 : 2;
@@ -426,11 +505,13 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             diza->src_set2 |= m2;
         }
     } else {
-        if (!setcc && c != 0x8D) {
+        if (!setcc && c != 0x8D && !nop_ea && !prefetch_ea) {
             diza->src_set |= XSET_OTHER; // segment override
             diza->src_set |= XSET_MEM;
         }
-        if (setcc || reg_src ||
+        if (prefetch_ea)
+            diza->src_set |= XSET_MEM;   // prefetches do read memory
+        if (mem_store || setcc || reg_src ||
             (diza->map == XDE_MAP_LEGACY &&
              ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
               c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
@@ -990,8 +1071,14 @@ got_opcode:
             if (diza->opcode == 0xD2 || diza->opcode == 0xD3)
                 diza->src_set |= XSET_CL;
         }
+        // C6 /0 and C7 /0 are the only valid forms of these groups. The one
+        // /7 exception is the exact ModR/M byte F8 (mod=3, reg=7, rm=0):
+        // C7 F8 is XBEGIN and C6 F8 is XABORT, which carry a relative or
+        // immediate operand instead of an r/m. Every other /7 stays invalid;
+        // for 0x8F that exempted byte is XOP's map selector and never reaches
+        // this point as a legacy opcode.
         if ((diza->opcode == 0xC6 || diza->opcode == 0xC7 || diza->opcode == 0x8F) &&
-            diza->map == XDE_MAP_LEGACY && reg != 0)
+            diza->map == XDE_MAP_LEGACY && reg != 0 && mpeek != 0xF8)
             diza->flag |= C_BAD;
         if (diza->opcode == 0xF6 && diza->map == XDE_MAP_LEGACY) {
             if (reg != 2)
