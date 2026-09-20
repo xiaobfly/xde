@@ -715,6 +715,124 @@ int main(void)
         }
     }
 
+    // Coverage: mode-dependent sets, implicit registers, I/O and flags.
+    {
+        static const uint8_t push64[] = { 0x55 };
+        expect_set("push rbp src RSP", 64, push64, 1, 0, XSET_RSP, 1);
+        expect_set("push rbp src RBP", 64, push64, 1, 0, XSET_RBP, 1);
+        expect_set("push rbp dst MEM", 64, push64, 1, 1, XSET_MEM, 1);
+        expect_flag("push rbp C_D64", 64, push64, 1, C_D64, 1);
+        expect_set("push (32) src ESP", 32, push64, 1, 0, XSET_ESP, 1);
+        expect_set("push (32) not RSP", 32, push64, 1, 0, XSET_RSP & ~XSET_ESP, 0);
+    }
+    {
+        static const uint8_t movsb16[] = { 0xA4 };
+        static const uint8_t mov16[] = { 0x8B, 0x06, 0x34, 0x12 };
+        expect_set("movsb (16) src SI", 16, movsb16, 1, 0, XSET_SI, 1);
+        expect_set("movsb (16) src DI", 16, movsb16, 1, 0, XSET_DI, 1);
+        expect_set("mov ax,[1234] (16) src M", 16, mov16, 4, 0, XSET_MEM, 1);
+        expect_set("mov ax,[1234] (16) dst AX", 16, mov16, 4, 1, XSET_AX, 1);
+        expect_flag("mov ax,[1234] C_ADDR2", 16, mov16, 4, C_ADDR2, 1);
+    }
+    {
+        static const uint8_t pusha32[] = { 0x60 };
+        expect_set("pusha (32) src EAX", 32, pusha32, 1, 0, XSET_EAX, 1);
+        expect_set("pusha (32) src EDI", 32, pusha32, 1, 0, XSET_EDI, 1);
+        expect_set("pusha (32) src ESP", 32, pusha32, 1, 0, XSET_ESP, 1);
+    }
+    {
+        static const uint8_t in_dx[] = { 0xEC };
+        static const uint8_t out_dx[] = { 0xEE };
+        static const uint8_t in_imm[] = { 0xE5, 0x10 };
+        expect_set("in al,dx src DEV", 64, in_dx, 1, 0, XSET_DEV, 1);
+        expect_set("in al,dx src DX", 64, in_dx, 1, 0, XSET_DX, 1);
+        expect_set("out dx,al src DEV", 64, out_dx, 1, 0, XSET_DEV, 1);
+        expect_set("out dx,al src DX", 64, out_dx, 1, 0, XSET_DX, 1);
+        expect_set("out dx,al (not dst DX)", 64, out_dx, 1, 1, XSET_DX, 0);
+        expect_set("in eax,0x10 src DEV", 64, in_imm, 2, 0, XSET_DEV, 1);
+        expect_set("in eax,0x10 (no DX)", 64, in_imm, 2, 0, XSET_DX, 0);
+    }
+    {
+        static const uint8_t cpuid[] = { 0x0F, 0xA2 };
+        expect_set("cpuid src EAX", 64, cpuid, 2, 0, XSET_EAX, 1);
+        expect_set("cpuid dst EAX", 64, cpuid, 2, 1, XSET_EAX, 1);
+        expect_set("cpuid dst EBX", 64, cpuid, 2, 1, XSET_EBX, 1);
+        expect_set("cpuid dst ECX", 64, cpuid, 2, 1, XSET_ECX, 1);
+        expect_set("cpuid dst EDX", 64, cpuid, 2, 1, XSET_EDX, 1);
+    }
+    {
+        static const uint8_t mov_es[] = { 0x8C, 0xC0 };
+        static const uint8_t mov_sreg[] = { 0x8E, 0xC0 };
+        static const uint8_t leave[] = { 0xC9 };
+        static const uint8_t shl_cl[] = { 0xD2, 0xE0 };
+        static const uint8_t rcl_cl[] = { 0xD2, 0xD0 };
+        expect_set("mov ax,es src other", 64, mov_es, 2, 0, XSET_OTHER, 1);
+        expect_set("mov es,ax dst other", 64, mov_sreg, 2, 1, XSET_OTHER, 1);
+        expect_set("leave src RSP", 64, leave, 1, 0, XSET_RSP, 1);
+        expect_set("leave dst RBP", 64, leave, 1, 1, XSET_RBP, 1);
+        expect_set("shl al,cl src CL", 64, shl_cl, 2, 0, XSET_CL, 1);
+        expect_set("shl al,cl src AL", 64, shl_cl, 2, 0, XSET_AL, 1);
+        expect_set("shl al,cl (no src FL)", 64, shl_cl, 2, 0, XSET_FL, 0);
+        expect_set("shl al,cl dst AL", 64, shl_cl, 2, 1, XSET_AL, 1);
+        expect_set("shl al,cl dst FL", 64, shl_cl, 2, 1, XSET_FL, 1);
+        expect_set("rcl al,cl src FL", 64, rcl_cl, 2, 0, XSET_FL, 1);
+        expect_set("rcl al,cl dst FL", 64, rcl_cl, 2, 1, XSET_FL, 1);
+        {
+            static const uint8_t test_eax[] = { 0xF7, 0xC0, 0x01, 0, 0, 0 };
+            static const uint8_t not_al[] = { 0xF6, 0xD0 };
+            expect_set("test eax,1 dst FL", 64, test_eax, 6, 1, XSET_FL, 1);
+            expect_set("not al (no dst FL)", 64, not_al, 2, 1, XSET_FL, 0);
+        }
+    }
+    {
+        static const uint8_t retn[] = { 0xC3 };
+        static const uint8_t jmp8[] = { 0xEB, 0x00 };
+        static const uint8_t jz8[] = { 0x74, 0x00 };
+        static const uint8_t sysc[] = { 0x0F, 0x05 };
+        static const uint8_t callrel[] = { 0xE8, 0, 0, 0, 0 };
+        static const uint8_t inc32[] = { 0x40 };
+        static const uint8_t now[] = { 0x0F, 0x0F, 0xC1, 0xBF };
+        static const uint8_t mov8[] = { 0x88, 0xC4 };
+        static const uint8_t sib[] = { 0x89, 0x4C, 0x24, 0x08 };
+        expect_flag("ret C_STOP", 64, retn, 1, C_STOP, 1);
+        expect_flag("ret C_CMD_RET", 64, retn, 1, C_CMD_RET, 1);
+        expect_flag("jmp rel8 C_CMD_JMP", 64, jmp8, 2, C_CMD_JMP, 1);
+        expect_flag("jz rel8 C_CMD_JCC", 64, jz8, 2, C_CMD_JCC, 1);
+        expect_flag("call rel32 C_CMD_CALL", 64, callrel, 5, C_CMD_CALL, 1);
+        expect_flag("inc eax (32) C_I64", 32, inc32, 1, C_I64, 1);
+        expect_flag("jz rel8 C_REL", 64, jz8, 2, C_REL, 1);
+        expect_flag("jz rel8 C_F64", 64, jz8, 2, C_F64, 1);
+        expect_flag("syscall C_O64", 64, sysc, 2, C_O64, 1);
+        expect_flag("pavgusb C_3DNOW", 64, now, 4, C_3DNOW, 1);
+        expect_flag("mov ah,al C_OPSZ8", 64, mov8, 2, C_OPSZ8, 1);
+        expect_flag("mov [rsp+8],ecx C_SIB", 64, sib, 4, C_SIB, 1);
+        expect_flag("mov [rsp+8],ecx C_ADDR1", 64, sib, 4, C_ADDR1, 1);
+    }
+    {
+        // 67 in 64-bit makes mod=0/rm=5 an absolute disp32, not RIP-relative.
+        static const uint8_t abs32[] = { 0x67, 0x8B, 0x05, 0, 0, 0, 0 };
+        expect_flag("67 abs32 no C_RIPREL", 64, abs32, 7, C_RIPREL, 0);
+        expect_flag("67 abs32 C_ADDR4", 64, abs32, 7, C_ADDR4, 1);
+        expect_set("67 abs32 src M", 64, abs32, 7, 0, XSET_MEM, 1);
+    }
+    {
+        static const uint8_t mov_imm16[] = { 0x66, 0xB8, 0x34, 0x12 };
+        static const uint8_t ud2[] = { 0x0F, 0x0B };
+        char buf[512];
+        struct xde_instr d;
+
+        expect_flag("66 mov ax,imm16 C_DATA2", 64, mov_imm16, 4, C_DATA2, 1);
+        expect_set("66 mov ax,imm16 dst AX", 64, mov_imm16, 4, 1, XSET_AX, 1);
+
+        expect_flag("ud2 C_UNDEF", 64, ud2, 2, C_UNDEF, 1);
+        xde_disasm(ud2, &d);
+        xde_sprintset(buf, d.src_set);
+        if (strcmp(buf, "???") != 0) {
+            fail("ud2 sets undefined", buf);
+        } else {
+            printf("ok %-28s %s\n", "ud2 sets undefined", buf);
+        }
+    }
     {
         static const uint8_t pop[] = { 0x8F, 0xC0 };
         expect_len("pop rax (8F /0)", 64, pop, 2, 2);

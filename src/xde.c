@@ -223,12 +223,10 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
             (c == 0xEC) || (c == 0xED) || (c == 0xEE) || (c == 0xEF)) {
             diza->src_set |= XSET_DEV;
             diza->dst_set |= XSET_DEV;
-            if ((c == 0xEC) || (c == 0xED) || (c == 0xEE) || (c == 0xEF)) {
-                if ((c == 0xEC) || (c == 0xED))
-                    diza->src_set |= XSET_DX;
-                else
-                    diza->dst_set |= XSET_DX;
-            }
+            // The DX-port forms (EC/ED IN, EE/EF OUT) always read the port
+            // number from DX, so it belongs in src for all four.
+            if ((c == 0xEC) || (c == 0xED) || (c == 0xEE) || (c == 0xEF))
+                diza->src_set |= XSET_DX;
         }
         if ((c == 0x06) || (c == 0x0E) || (c == 0x16) || (c == 0x1E))
             diza->src_set |= XSET_OTHER;
@@ -938,7 +936,8 @@ got_opcode:
              (diza->opcode >= 0xD0 && diza->opcode <= 0xD3)) &&
             diza->map == XDE_MAP_LEGACY) {
             if (reg == 2 || reg == 3)
-                diza->src_set |= XSET_FL;
+                diza->src_set |= XSET_FL;   // RCL/RCR read CF
+            diza->dst_set |= XSET_FL;       // all eight write CF/OF
             if (diza->opcode == 0xD2 || diza->opcode == 0xD3)
                 diza->src_set |= XSET_CL;
         }
@@ -946,6 +945,8 @@ got_opcode:
             diza->map == XDE_MAP_LEGACY && reg != 0)
             diza->flag |= C_BAD;
         if (diza->opcode == 0xF6 && diza->map == XDE_MAP_LEGACY) {
+            if (reg != 2)
+                diza->dst_set |= XSET_FL;   // NOT (/2) writes no flags
             if (reg == 4 || reg == 5) {
                 diza->src_set |= XSET_AL;
                 diza->dst_set |= XSET_AX;
@@ -959,6 +960,8 @@ got_opcode:
             int sz = (int)diza->defdata;
             uint64_t acc = gp_set(sz, 0, diza->rex != 0, NULL);
             uint64_t dx  = gp_set(sz, 2, diza->rex != 0, NULL);
+            if (reg != 2)
+                diza->dst_set |= XSET_FL;   // NOT (/2) writes no flags
             if (reg == 4 || reg == 5) {
                 diza->src_set |= acc;
                 diza->dst_set |= acc | dx | XSET_FL;
