@@ -91,7 +91,6 @@ only as the width-agnostic `R8`-`R15`.
   mistaken for AAD. Its `R4`/`X4`/`B4` payload bits extend the register number
   to 5 bits, so `r16-r31` are reported in `src_set2` / `dst_set2`. Like `REX`,
   REX2 also makes `SPL/BPL/SIL/DIL` reachable instead of `AH/CH/DH/BH`.
-
 - Re-encoding emits the legacy prefixes in canonical group order (lock/rep,
   segment, `66`, `67`), so a non-canonical input normalises on `xde_asm`.
 - Flag reporting: `CMPS`/`SCAS` and `CLD`/`STD` write `XSET_FL`, `SETcc` reads
