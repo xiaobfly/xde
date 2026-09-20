@@ -195,7 +195,7 @@ int main(void)
             struct xde_instr d;
             xde_disasm(rip, &d);
             if (!(d.flag & C_RIPREL))
-                fail("mov rax,[rip+0]", "missing C_RIPREL");
+                fail("mov rax,[rip+0] flag", "missing C_RIPREL");
             else
                 printf("ok %-28s RIPREL\n", "mov rax,[rip+0] flag");
         }
@@ -388,6 +388,11 @@ int main(void)
         expect_fail("push es invalid in 64", 64, push_es, 1);
     }
 
+    {
+        static const uint8_t legacy[] = { 0x31, 0xC0 };
+        expect_enc("xor eax,eax legacy enc", 64, legacy, 2, 2, XDE_ENC_LEGACY);
+    }
+
     // REX2 (APX)
     {
         static const uint8_t rex2[] = { 0xD5, 0x40, 0x8D, 0x00 };
@@ -413,7 +418,7 @@ int main(void)
     }
     {
         static const uint8_t egpr_lea[] = { 0xD5, 0x40, 0x8D, 0x00 };
-        expect_set("rex2 lea r16d,[rax]", 64, egpr_lea, 4, 3, XSET2_R16, 1);
+        expect_set("rex2 lea r16d dst2", 64, egpr_lea, 4, 3, XSET2_R16, 1);
         expect_set("rex2 lea r16d (not other)", 64, egpr_lea, 4, 1, XSET_OTHER, 0);
     }
     {
@@ -858,6 +863,7 @@ int main(void)
             printf("ok %-28s %s\n", "ud2 sets undefined", buf);
         }
     }
+    // Group-encoded operand forms: 8F /0 POP, F6 /0 TEST, F6 /2 NOT, FF /2 CALL.
     {
         static const uint8_t pop[] = { 0x8F, 0xC0 };
         expect_len("pop rax (8F /0)", 64, pop, 2, 2);
