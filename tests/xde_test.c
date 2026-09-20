@@ -98,6 +98,12 @@ static void expect_roundtrip(const char *name, unsigned mode, const uint8_t *b, 
         fail(name, msg);
         return;
     }
+    if (memcmp(out, b, n) != 0) {
+        char hx[128];
+        hexbytes(hx, out, (int)n);
+        fail(name, hx);
+        return;
+    }
     got2 = xde_disasm_buf(out, 15, &d2, mode);
     if (got2 != got || d2.opcode != d.opcode || d2.modrm != d.modrm) {
         fail(name, "re-disasm mismatch");
@@ -376,6 +382,8 @@ int main(void)
         static const uint8_t spl_mov[] = { 0x40, 0x88, 0xC4 };
         expect_set("mov spl,al", 64, spl_mov, 3, 1, XSET_SPL, 1);
         expect_set("mov spl,al (not SP)", 64, spl_mov, 3, 1, XSET_SP, 0);
+        expect_set("mov spl,al (src AL)", 64, spl_mov, 3, 0, XSET_AL, 1);
+        expect_set("mov spl,al (no src SPL)", 64, spl_mov, 3, 0, XSET_SPL, 0);
     }
     {
         static const uint8_t ah_mov[] = { 0x88, 0xC4 };
@@ -418,6 +426,12 @@ int main(void)
         else
             printf("ok %-28s %s\n", "sprintset2 R16", buf);
 
+        xde_sprintset2(buf, XSET2_R8B);
+        if (strcmp(buf, "R8B") != 0)
+            fail("sprintset2 R8B", buf);
+        else
+            printf("ok %-28s %s\n", "sprintset2 R8B", buf);
+
         xde_sprintset(buf, XSET_SPL);
         if (strcmp(buf, "SPL") != 0)
             fail("sprintset SPL", buf);
@@ -430,6 +444,42 @@ int main(void)
             fail("sprintset2 decoded", buf);
         else
             printf("ok %-28s %s\n", "sprintset2 decoded", buf);
+    }
+
+    // REX2 round-trip with a legacy prefix, MOV store forms, 8-bit r8-r15.
+    {
+        static const uint8_t rex2_66[] = { 0x66, 0xD5, 0x40, 0x8D, 0x00 };
+        expect_roundtrip("66 rex2 lea rt", 64, rex2_66, 5);
+    }
+    {
+        static const uint8_t mov_al_imm[] = { 0xC6, 0xC0, 0x12 };
+        expect_set("mov al,0x12 dst", 64, mov_al_imm, 3, 1, XSET_AL, 1);
+        expect_set("mov al,0x12 (no src)", 64, mov_al_imm, 3, 0, XSET_AL, 0);
+    }
+    {
+        static const uint8_t mov_load[] = { 0x8B, 0xC3 };
+        expect_set("mov eax,ebx src", 64, mov_load, 2, 0, XSET_EBX, 1);
+        expect_set("mov eax,ebx dst", 64, mov_load, 2, 1, XSET_EAX, 1);
+    }
+    {
+        static const uint8_t mov_r8b[] = { 0x41, 0x88, 0xC0 };
+        expect_set("mov r8b,al R8", 64, mov_r8b, 3, 1, XSET_R8, 1);
+        expect_set("mov r8b,al R8B", 64, mov_r8b, 3, 3, XSET2_R8B, 1);
+    }
+    {
+        static const uint8_t mov_r15b[] = { 0x41, 0x88, 0xC7 };
+        expect_set("mov r15b,al R15", 64, mov_r15b, 3, 1, XSET_R15, 1);
+        expect_set("mov r15b,al R15B", 64, mov_r15b, 3, 3, XSET2_R15B, 1);
+    }
+    {
+        static const uint8_t mov_r8q[] = { 0x49, 0x8B, 0xC0 };
+        expect_set("mov rax,r8 src R8", 64, mov_r8q, 3, 0, XSET_R8, 1);
+        expect_set("mov rax,r8 (no R8B)", 64, mov_r8q, 3, 2, XSET2_R8B, 0);
+    }
+    {
+        static const uint8_t mov_r8d[] = { 0x44, 0x8B, 0xC0 };
+        expect_set("mov r8d,eax R8", 64, mov_r8d, 3, 1, XSET_R8, 1);
+        expect_set("mov r8d,eax (no R8B)", 64, mov_r8d, 3, 3, XSET2_R8B, 0);
     }
 
     {

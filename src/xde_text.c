@@ -125,6 +125,15 @@ void __cdecl xde_sprintset2(char *output, uint64_t set2)
             strcat(output, "|");
         }
     }
+    for (i = 0; i < 8; i++) {
+        if (set2 & (XSET2_R8B << i)) {
+            static const char *names_b[8] = {
+                "R8B", "R9B", "R10B", "R11B", "R12B", "R13B", "R14B", "R15B"
+            };
+            strcat(output, names_b[i]);
+            strcat(output, "|");
+        }
+    }
 
     if (output[0] && output[strlen(output) - 1] == '|')
         output[strlen(output) - 1] = 0;

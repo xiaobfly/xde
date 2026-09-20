@@ -70,8 +70,13 @@ static uint64_t gp_set(int sz, unsigned reg, int rex, uint64_t *egpr)
             *egpr |= XSET2_R16 << (reg - 16);
         return 0;
     }
-    if (reg >= 8)
+    if (reg >= 8) {
+        // 8-bit access to r8..r15: add the width-specific second-word bit, the
+        // first word keeps reporting the width-agnostic register.
+        if (sz <= 1 && egpr)
+            *egpr |= XSET2_R8B << (reg - 8);
         return XSET_R8 << (reg - 8);
+    }
 
     if (sz <= 1)
         return rex ? lo8_rex[reg] : lo8_norex[reg];
@@ -326,7 +331,9 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             rset = XSET_OTHER;
             rset2 = 0;
         }
-        if (c != 0x8D) {
+        // MOV store forms (88/89, C6/C7) only write their r/m operand, so it
+        // must not land in src_set; every other form reads it too.
+        if (c != 0x8D && c != 0x88 && c != 0x89 && c != 0xC6 && c != 0xC7) {
             diza->src_set |= rset;
             diza->src_set2 |= rset2;
         }
@@ -335,7 +342,8 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
              c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
              (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
-             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83))) {
+             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
+             c == 0xC6 || c == 0xC7)) {
             diza->dst_set |= rset;
             diza->dst_set2 |= rset2;
         }
@@ -1013,6 +1021,8 @@ int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza)
     if (diza->p_67)   *p++ = diza->p_67;
 
     if (diza->nvex) {
+        // REX2 keeps its legacy prefixes (VEX/EVEX/XOP clear p_66).
+        if (diza->p_66) *p++ = diza->p_66;
         for (i = 0; i < diza->nvex; i++)
             *p++ = diza->vex[i];
         *p++ = diza->opcode;

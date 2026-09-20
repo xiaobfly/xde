@@ -17,7 +17,8 @@ AVX/AVX-512/XOP encodings.
 - Tracks **src_set / dst_set** bitmasks for GPRs, flags, memory, and I/O
   (SIMD/mask/control registers collapse to `XSET_OTHER`, same idea as 1.02);
   8-bit `SPL/BPL/SIL/DIL` are distinct from `SP/BP/SI/DI`, and APX EGPRs
-  `r16-r31` live in the second word `src_set2 / dst_set2`
+  `r16-r31` plus the 8-bit `r8b-r15b` forms live in the second word
+  `src_set2 / dst_set2`
 
 ## Layout
 
@@ -73,7 +74,9 @@ int m = xde_asm(out, &diza);
 Low 32 bits of `flag` / `src_set` / `dst_set` stay compatible with XDE 1.02
 for EAX-EDI. RAX-RDI width bits, R8-R15, RIP, and encoding-class flags live
 in the high half of the 64-bit fields. APX `r16-r31` live in `src_set2` /
-`dst_set2` (`XSET2_*`), because the first word has no room left.
+`dst_set2` (`XSET2_*`), because the first word has no room left; the same
+word carries the 8-bit `r8b-r15b` width bits, which the first word reports
+only as the width-agnostic `R8`-`R15`.
 
 ## Notes
 
