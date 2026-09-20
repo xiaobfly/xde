@@ -19,9 +19,17 @@ void __cdecl xde_sprintfl(char *output, uint64_t fl)
     if (fl & C_XOP)    strcat(output, "C_XOP|");
     if (fl & C_REX2)   strcat(output, "C_REX2|");
     if (fl & C_UNDEF)  strcat(output, "C_UNDEF|");
-    // Sizes are readable from addrsize/datasize and p_66/p_67, so the
-    // C_ADDR*/C_DATA*/C_ADDR67/C_DATA66 flags are not repeated here.
     if (fl & C_OPSZ8)  strcat(output, "C_OPSZ8|");
+    if (fl & C_ADDR67) strcat(output, "C_ADDR67|");
+    if (fl & C_DATA66) strcat(output, "C_DATA66|");
+    if (fl & C_ADDR1)  strcat(output, "C_ADDR1|");
+    if (fl & C_ADDR2)  strcat(output, "C_ADDR2|");
+    if (fl & C_ADDR4)  strcat(output, "C_ADDR4|");
+    if (fl & C_ADDR8)  strcat(output, "C_ADDR8|");
+    if (fl & C_DATA1)  strcat(output, "C_DATA1|");
+    if (fl & C_DATA2)  strcat(output, "C_DATA2|");
+    if (fl & C_DATA4)  strcat(output, "C_DATA4|");
+    if (fl & C_DATA8)  strcat(output, "C_DATA8|");
     if (fl & C_PUSH)   strcat(output, "C_PUSH|");
     if (fl & C_POP)    strcat(output, "C_POP|");
     if (fl & C_I64)    strcat(output, "C_I64|");

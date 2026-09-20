@@ -581,6 +581,27 @@ int main(void)
             printf("ok %-28s %s\n", "sprintfl C_CMD_RET", buf);
         }
 
+        {
+            static const uint8_t movimm[] = { 0xB8, 0x01, 0x02, 0x03, 0x04 };
+            static const uint8_t riprel[] = { 0x48, 0x8B, 0x05, 0, 0, 0, 0 };
+
+            xde_disasm(movimm, &d);
+            xde_sprintfl(buf, d.flag);
+            if (strstr(buf, "C_DATA4") == NULL) {
+                fail("sprintfl C_DATA4", buf);
+            } else {
+                printf("ok %-28s %s\n", "sprintfl C_DATA4", buf);
+            }
+
+            xde_disasm(riprel, &d);
+            xde_sprintfl(buf, d.flag);
+            if (strstr(buf, "C_ADDR4") == NULL) {
+                fail("sprintfl C_ADDR4", buf);
+            } else {
+                printf("ok %-28s %s\n", "sprintfl C_ADDR4", buf);
+            }
+        }
+
         xde_sprintset2(buf, XSET2_ALL | 0x10000000000ULL);
         if (strcmp(buf, "???") != 0) {
             fail("sprintset2 undef subset", buf);
@@ -647,6 +668,50 @@ int main(void)
             fail("sete al not undef", buf);
         } else {
             printf("ok %-28s %s\n", "sete al not undef", buf);
+        }
+    }
+    {
+        static const uint8_t sahf[] = { 0x9E };
+        static const uint8_t lahf[] = { 0x9F };
+        expect_set("sahf src AH", 64, sahf, 1, 0, XSET_AH, 1);
+        expect_set("sahf dst FL", 64, sahf, 1, 1, XSET_FL, 1);
+        expect_set("lahf src FL", 64, lahf, 1, 0, XSET_FL, 1);
+        expect_set("lahf dst AH", 64, lahf, 1, 1, XSET_AH, 1);
+    }
+    {
+        // Every printer must stay inside the documented 256-byte buffer, for
+        // any input, including the impossible-looking all-bits case.
+        char buf[512];
+        unsigned n;
+        const uint64_t allflags =
+            C_ADDR1 | C_ADDR2 | C_ADDR4 | C_MODRM | C_SIB | C_ADDR67 | C_DATA66 |
+            C_UNDEF | C_DATA1 | C_DATA2 | C_DATA4 | C_BAD | C_REL | C_STOP |
+            C_OPSZ8 | C_PUSH | C_POP | C_DATA8 | C_ADDR8 | C_RIPREL | C_REX |
+            C_VEX | C_EVEX | C_XOP | C_REX2 | C_I64 | C_O64 | C_F64 | C_D64 |
+            C_3DNOW | C_CMD_CALL;
+
+        xde_sprintfl(buf, allflags);
+        n = (unsigned)strlen(buf);
+        if (n == 0 || n >= 256) {
+            fail("sprintfl worst case", "over 255 bytes or empty");
+        } else {
+            printf("ok %-28s %u bytes\n", "sprintfl worst case", n);
+        }
+
+        xde_sprintset(buf, ~0ULL ^ (1ULL << 63));
+        n = (unsigned)strlen(buf);
+        if (n == 0 || n >= 256) {
+            fail("sprintset worst case", "over 255 bytes or empty");
+        } else {
+            printf("ok %-28s %u bytes\n", "sprintset worst case", n);
+        }
+
+        xde_sprintset2(buf, XSET2_ALL & ~XSET2_R16);
+        n = (unsigned)strlen(buf);
+        if (n == 0 || n >= 256) {
+            fail("sprintset2 worst case", "over 255 bytes or empty");
+        } else {
+            printf("ok %-28s %u bytes\n", "sprintset2 worst case", n);
         }
     }
 

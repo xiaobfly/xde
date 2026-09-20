@@ -188,8 +188,15 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
             diza->src_set |= xset | XSET_DX;
             diza->dst_set |= xset;
         }
-        if (c == 0x9E) diza->src_set |= XSET_AH;
-        if (c == 0x9F) diza->dst_set |= XSET_AH;
+        // SAHF reads AH and writes the flags; LAHF is the other way round.
+        if (c == 0x9E) {
+            diza->src_set |= XSET_AH;
+            diza->dst_set |= XSET_FL;
+        }
+        if (c == 0x9F) {
+            diza->src_set |= XSET_FL;
+            diza->dst_set |= XSET_AH;
+        }
         if (c == 0x98) {
             if (data == 2) { diza->src_set |= XSET_AL;  diza->dst_set |= XSET_AX; }
             else if (data == 4) { diza->src_set |= XSET_AX;  diza->dst_set |= XSET_EAX; }

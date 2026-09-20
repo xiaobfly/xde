@@ -51,6 +51,9 @@ Regenerate tables after editing `tools/gen_tables.py`:
 python tools\gen_tables.py
 ```
 
+The generator also refuses to write when `src/xdetbl.h` disagrees with the
+constants mirrored in the script, so the two copies cannot drift silently.
+
 ## API
 
 ```c

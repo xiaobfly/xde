@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "src", "xdetbl.c")
@@ -40,11 +41,25 @@ IMM_AP = 5 << XA_IMM_SHIFT
 IMM_ENTER = 6 << XA_IMM_SHIFT
 IMM_ID = 7 << XA_IMM_SHIFT
 
+# Mirrored under their xdetbl.h names so check_header() can compare the two
+# files name-for-name.
+XA_IMM_MASK = 0x0F << XA_IMM_SHIFT
+XA_IMM_NONE = IMM_NONE
+XA_IMM_IB = IMM_IB
+XA_IMM_IW = IMM_IW
+XA_IMM_IZ = IMM_IZ
+XA_IMM_IV = IMM_IV
+XA_IMM_AP = IMM_AP
+XA_IMM_ENTER = IMM_ENTER
+XA_IMM_ID = IMM_ID
+XA_GRP_MASK = 0x7F << XA_GRP_SHIFT
+
 
 def GRP(n: int) -> int:
     return XA_GROUP | (n << XA_GRP_SHIFT)
 
 
+XG_NONE = 0
 XG_1, XG_1A, XG_2, XG_3_1, XG_3_2 = 1, 2, 3, 4, 5
 XG_4, XG_5, XG_6, XG_7, XG_8 = 6, 7, 8, 9, 10
 XG_9, XG_10, XG_11A, XG_11B = 11, 12, 13, 14
@@ -575,6 +590,54 @@ def fmt_row(row: list[int]) -> str:
     return "\n".join(lines)
 
 
+def check_header() -> None:
+    """Fail if src/xdetbl.h disagrees with the constants mirrored above.
+
+    xdetbl.h is hand-written and repeats every value defined in this file, so
+    a one-sided edit would be read as a different table with no compile-time
+    symptom. Compare before writing anything.
+    """
+    path = os.path.join(ROOT, "src", "xdetbl.h")
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    bad = []
+
+    for found in re.finditer(r"^#define\s+(XA_\w+)\s+(\S.*?)\s*$", text, re.M):
+        name, raw = found.group(1), found.group(2)
+        raw = re.sub(r"(?<=[0-9A-Fa-f])[uU]\b", "", raw)
+        if name not in globals():
+            bad.append(f"{name}: in xdetbl.h, not mirrored here")
+            continue
+        try:
+            value = eval(raw, {"__builtins__": {}}, globals())
+        except Exception:
+            bad.append(f"{name}: cannot evaluate `{raw}` from xdetbl.h")
+            continue
+        if value != globals()[name]:
+            bad.append(f"{name}: xdetbl.h {value:#x} vs script {globals()[name]:#x}")
+
+    enum = re.search(r"enum\s+xde_group_id\s*\{(.*?)\}", text, re.S)
+    if enum is None:
+        bad.append("enum xde_group_id not found in xdetbl.h")
+    else:
+        for i, found in enumerate(re.finditer(r"^\s*(XG_\w+)", enum.group(1), re.M)):
+            name = found.group(1)
+            if name not in globals():
+                bad.append(f"{name}: in xdetbl.h, not mirrored here")
+            elif globals()[name] != i:
+                bad.append(f"{name}: xdetbl.h {i} vs script {globals()[name]}")
+
+    found = re.search(r"^#define\s+XDE_MAP_COUNT\s+(\d+)", text, re.M)
+    if found is None:
+        bad.append("XDE_MAP_COUNT not found in xdetbl.h")
+    elif int(found.group(1)) != len(MAPS):
+        bad.append(f"XDE_MAP_COUNT: xdetbl.h {found.group(1)} vs {len(MAPS)} maps")
+
+    if bad:
+        raise SystemExit("xdetbl.h and gen_tables.py disagree:\n  " + "\n  ".join(bad))
+
+
 map_names = [
     "legacy",
     "0F",
@@ -610,6 +673,8 @@ for gi in range(XG_COUNT):
     lines.append(f"    {{ {vals} }}{comma}")
 lines.append("};")
 lines.append("")
+
+check_header()
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, "w", newline="\n", encoding="utf-8") as f:
