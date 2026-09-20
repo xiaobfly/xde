@@ -48,7 +48,7 @@ static void expect_enc(const char *name, unsigned mode,
                        const uint8_t *b, unsigned n, int want_len, int enc)
 {
     struct xde_instr d;
-    int got = xde_disasm_buf(b, 15, &d, mode);
+    int got = xde_disasm_buf(b, n, &d, mode);
     if (got != want_len) {
         char msg[128];
         sprintf(msg, "len=%d want=%d", got, want_len);
@@ -807,6 +807,31 @@ int main(void)
         expect_flag("mov ah,al C_OPSZ8", 64, mov8, 2, C_OPSZ8, 1);
         expect_flag("mov [rsp+8],ecx C_SIB", 64, sib, 4, C_SIB, 1);
         expect_flag("mov [rsp+8],ecx C_ADDR1", 64, sib, 4, C_ADDR1, 1);
+        {
+            static const uint8_t xorq[] = { 0x48, 0x31, 0xC0 };
+            static const uint8_t lea2[] = { 0xD5, 0x40, 0x8D, 0x00 };
+            static const uint8_t vexps[] = { 0xC5, 0xF8, 0x58, 0xC1 };
+            static const uint8_t evexps[] = { 0x62, 0xF1, 0x7C, 0x48, 0x58, 0xC1 };
+            static const uint8_t xopps[] = { 0x8F, 0xE9, 0x78, 0x81, 0xC1 };
+            static const uint8_t pushr[] = { 0x55 };
+            static const uint8_t popr[] = { 0x8F, 0xC0 };
+            static const uint8_t moffs8[] = { 0x48, 0xA1, 1, 2, 3, 4, 5, 6, 7, 8 };
+            static const uint8_t imm64[] = { 0x48, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8 };
+            static const uint8_t imm8b[] = { 0xB0, 0x12 };
+
+            expect_flag("mov ah,al C_MODRM", 64, mov8, 2, C_MODRM, 1);
+            expect_flag("xor rax,rax C_REX", 64, xorq, 3, C_REX, 1);
+            expect_flag("rex2 lea C_REX2", 64, lea2, 4, C_REX2, 1);
+            expect_flag("vaddps C_VEX", 64, vexps, 4, C_VEX, 1);
+            expect_flag("evex vaddps C_EVEX", 64, evexps, 6, C_EVEX, 1);
+            expect_flag("vfrczpd C_XOP", 64, xopps, 5, C_XOP, 1);
+            expect_flag("push rbp C_PUSH", 64, pushr, 1, C_PUSH, 1);
+            expect_flag("pop rax C_POP", 64, popr, 2, C_POP, 1);
+            expect_flag("mov rax,[moffs64] C_ADDR67", 64, moffs8, 10, C_ADDR67, 1);
+            expect_flag("mov rax,[moffs64] C_ADDR8", 64, moffs8, 10, C_ADDR8, 1);
+            expect_flag("mov rax,imm64 C_DATA8", 64, imm64, 10, C_DATA8, 1);
+            expect_flag("mov al,0x12 C_DATA1", 64, imm8b, 2, C_DATA1, 1);
+        }
     }
     {
         // 67 in 64-bit makes mod=0/rm=5 an absolute disp32, not RIP-relative.

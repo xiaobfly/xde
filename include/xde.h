@@ -50,6 +50,9 @@ extern "C" {
 #define XDE_MAP_XOPA    10
 
 // Instruction flags (xde_instr.flag) - low 32 bits compatible with XDE 1.02
+// Never set by 2.00 (1.02 vocabulary kept for compatibility): C_SPECIAL,
+// C_DATA66, the C_SRC_*/C_DST_* operand micro-bits and their C_MOD_* aliases,
+// and C_ERROR. Read addrsize/datasize/p_66 for the sizes those would carry.
 #define C_SPECIAL  0
 #define C_ADDR1    0x00000001u
 #define C_ADDR2    0x00000002u
