@@ -106,6 +106,31 @@ static void expect_roundtrip(const char *name, unsigned mode, const uint8_t *b, 
     printf("ok %-28s rt %d\n", name, got);
 }
 
+// Assert that one object-set bit is present (want=1) or absent (want=0).
+// sel: 0 = src_set, 1 = dst_set, 2 = src_set2, 3 = dst_set2.
+static void expect_set(const char *name, unsigned mode, const uint8_t *b, unsigned n,
+                       int sel, uint64_t bit, int want)
+{
+    struct xde_instr d;
+    uint64_t got;
+
+    if (xde_disasm_buf(b, n, &d, mode) != (int)n) {
+        fail(name, "decode length mismatch");
+        return;
+    }
+    got = sel == 0 ? d.src_set : sel == 1 ? d.dst_set
+                     : sel == 2 ? d.src_set2 : d.dst_set2;
+    if (((got & bit) != 0) != (want != 0)) {
+        char msg[256];
+        sprintf(msg, "sel=%d bit=0x%llX want=%d got=0x%llX", sel,
+                (unsigned long long)bit, want, (unsigned long long)got);
+        fail(name, msg);
+        return;
+    }
+    printf("ok %-28s set%d 0x%llX %s\n", name, sel,
+           (unsigned long long)bit, want ? "set" : "clear");
+}
+
 int main(void)
 {
     // 64-bit GP
@@ -344,6 +369,67 @@ int main(void)
     {
         static const uint8_t rex2m[] = { 0xD5, 0xC0, 0xAF, 0xC0 };
         expect_enc("rex2 imul r16d,eax", 64, rex2m, 4, 4, XDE_ENC_REX2);
+    }
+
+    // Object sets: 8-bit extension registers vs high bytes, and APX EGPRs.
+    {
+        static const uint8_t spl_mov[] = { 0x40, 0x88, 0xC4 };
+        expect_set("mov spl,al", 64, spl_mov, 3, 1, XSET_SPL, 1);
+        expect_set("mov spl,al (not SP)", 64, spl_mov, 3, 1, XSET_SP, 0);
+    }
+    {
+        static const uint8_t ah_mov[] = { 0x88, 0xC4 };
+        expect_set("mov ah,al", 64, ah_mov, 2, 1, XSET_AH, 1);
+        expect_set("mov ah,al (not SPL)", 64, ah_mov, 2, 1, XSET_SPL, 0);
+    }
+    {
+        static const uint8_t egpr_lea[] = { 0xD5, 0x40, 0x8D, 0x00 };
+        expect_set("rex2 lea r16d,[rax]", 64, egpr_lea, 4, 3, XSET2_R16, 1);
+        expect_set("rex2 lea r16d (not other)", 64, egpr_lea, 4, 1, XSET_OTHER, 0);
+    }
+    {
+        static const uint8_t egpr_lea31[] = { 0xD5, 0x44, 0x8D, 0x38 };
+        expect_set("rex2 lea r31d,[rax]", 64, egpr_lea31, 4, 3, XSET2_R31, 1);
+    }
+    {
+        static const uint8_t egpr_push[] = { 0xD5, 0x10, 0x50 };
+        expect_set("rex2 push r16", 64, egpr_push, 3, 2, XSET2_R16, 1);
+    }
+    {
+        static const uint8_t egpr_sib[] = { 0xD5, 0x10, 0x8B, 0x04, 0x00 };
+        expect_set("rex2 mov eax,[r16]", 64, egpr_sib, 5, 2, XSET2_R16, 1);
+        expect_set("rex2 mov eax,[r16+rax]", 64, egpr_sib, 5, 2, XSET_RAX, 1);
+    }
+    {
+        // mod == 3 with REX2: the reg field is an EGPR, the r/m a legacy GPR.
+        static const uint8_t egpr_add[] = { 0xD5, 0x40, 0x01, 0xC0 };
+        expect_set("rex2 add rax,r16", 64, egpr_add, 4, 2, XSET2_R16, 1);
+        expect_set("rex2 add rax,r16 dst", 64, egpr_add, 4, 1, XSET_RAX, 1);
+        expect_set("rex2 add rax,r16 (not other)", 64, egpr_add, 4, 1, XSET_OTHER, 0);
+    }
+    {
+        char buf[512];
+        struct xde_instr d;
+        static const uint8_t egpr_lea2[] = { 0xD5, 0x40, 0x8D, 0x00 };
+
+        xde_sprintset2(buf, XSET2_R16);
+        if (strcmp(buf, "R16") != 0)
+            fail("sprintset2 R16", buf);
+        else
+            printf("ok %-28s %s\n", "sprintset2 R16", buf);
+
+        xde_sprintset(buf, XSET_SPL);
+        if (strcmp(buf, "SPL") != 0)
+            fail("sprintset SPL", buf);
+        else
+            printf("ok %-28s %s\n", "sprintset SPL", buf);
+
+        xde_disasm(egpr_lea2, &d);
+        xde_sprintset2(buf, d.dst_set2);
+        if (strcmp(buf, "R16") != 0)
+            fail("sprintset2 decoded", buf);
+        else
+            printf("ok %-28s %s\n", "sprintset2 decoded", buf);
     }
 
     {

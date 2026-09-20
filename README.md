@@ -15,7 +15,9 @@ AVX/AVX-512/XOP encodings.
   opcode map, ModR/M, SIB, displacement, immediate)
 - Merges the structure back to bytes (`xde_asm`)
 - Tracks **src_set / dst_set** bitmasks for GPRs, flags, memory, and I/O
-  (SIMD/mask/control registers collapse to `XSET_OTHER`, same idea as 1.02)
+  (SIMD/mask/control registers collapse to `XSET_OTHER`, same idea as 1.02);
+  8-bit `SPL/BPL/SIL/DIL` are distinct from `SP/BP/SI/DI`, and APX EGPRs
+  `r16-r31` live in the second word `src_set2 / dst_set2`
 
 ## Layout
 
@@ -70,7 +72,8 @@ int m = xde_asm(out, &diza);
 
 Low 32 bits of `flag` / `src_set` / `dst_set` stay compatible with XDE 1.02
 for EAX-EDI. RAX-RDI width bits, R8-R15, RIP, and encoding-class flags live
-in the high half of the 64-bit fields.
+in the high half of the 64-bit fields. APX `r16-r31` live in `src_set2` /
+`dst_set2` (`XSET2_*`), because the first word has no room left.
 
 ## Notes
 
@@ -80,7 +83,10 @@ in the high half of the 64-bit fields.
   not shrink the rel32 displacement in 64-bit mode.
 - `C4`/`C5`/`62`/`8F` are VEX/EVEX/XOP only when the following bytes match
   the prefix form; otherwise they remain LES/LDS/BOUND/POP in 16/32-bit mode.
-- APX **REX2** (`D5` in 64-bit) is decoded so `D5` is not mistaken for AAD.
+- APX **REX2** (`D5` in 64-bit, opcode map 0/1 only) is decoded so `D5` is not
+  mistaken for AAD. Its `R4`/`X4`/`B4` payload bits extend the register number
+  to 5 bits, so `r16-r31` are reported in `src_set2` / `dst_set2`. Like `REX`,
+  REX2 also makes `SPL/BPL/SIL/DIL` reachable instead of `AH/CH/DH/BH`.
 
 Original XDE 1.02 is 32-bit only and marks most SSE `0F` opcodes as errors.
 This tree is the version to use for x86-64 and SIMD encodings.

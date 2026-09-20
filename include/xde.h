@@ -137,8 +137,15 @@ extern "C" {
 #define XSET_EBP   0x00300000ULL
 #define XSET_SI    0x01000000ULL
 #define XSET_ESI   0x03000000ULL
-#define XSET_DI    0x10000000ULL
-#define XSET_EDI   0x30000000ULL
+#define XSET_DI     0x10000000ULL
+#define XSET_EDI    0x30000000ULL
+// 8-bit forms of SP/BP/SI/DI (REX-present low bytes: SPL/BPL/SIL/DIL).
+// These reuse the positions XDE 1.02 named XSET_rsrv1..4, so nothing 1.02
+// defined changes meaning.
+#define XSET_SPL    0x04000000ULL
+#define XSET_BPL    0x08000000ULL
+#define XSET_SIL    0x40000000ULL
+#define XSET_DIL    0x80000000ULL
 #define XSET_ALL16 0x11113333ULL
 #define XSET_ALL32 0x3333FFFFULL
 #define XSET_FL    0x00040000ULL
@@ -171,6 +178,28 @@ extern "C" {
 #define XSET_RIP   0x0001000000000000ULL
 #define XSET_UNDEF 0xFFFFFFFFFFFFFFFFULL
 
+// Second object-set word (src_set2 / dst_set2): APX extended GPRs r16-r31.
+// One bit per register, width-agnostic (r16b/r16w/r16d/r16 share a bit), the
+// same way XSET_R8..XSET_R15 work. Kept in a separate word because the first
+// word has no room left for 16 more registers.
+#define XSET2_R16   0x0000000000000001ULL
+#define XSET2_R17   0x0000000000000002ULL
+#define XSET2_R18   0x0000000000000004ULL
+#define XSET2_R19   0x0000000000000008ULL
+#define XSET2_R20   0x0000000000000010ULL
+#define XSET2_R21   0x0000000000000020ULL
+#define XSET2_R22   0x0000000000000040ULL
+#define XSET2_R23   0x0000000000000080ULL
+#define XSET2_R24   0x0000000000000100ULL
+#define XSET2_R25   0x0000000000000200ULL
+#define XSET2_R26   0x0000000000000400ULL
+#define XSET2_R27   0x0000000000000800ULL
+#define XSET2_R28   0x0000000000001000ULL
+#define XSET2_R29   0x0000000000002000ULL
+#define XSET2_R30   0x0000000000004000ULL
+#define XSET2_R31   0x0000000000008000ULL
+#define XSET2_ALL   0x000000000000FFFFULL
+
 
 struct xde_instr
 {
@@ -186,6 +215,8 @@ struct xde_instr
     uint64_t flag;           // C_* flags
     uint64_t src_set;
     uint64_t dst_set;
+    uint64_t src_set2;       // XSET2_* : APX extended GPRs r16-r31
+    uint64_t dst_set2;
 
     uint8_t  p_lock;         // 0 or 0xF0
     uint8_t  p_66;           // 0 or 0x66 (legacy; not used with VEX/EVEX/XOP)
@@ -203,6 +234,7 @@ struct xde_instr
     uint8_t  sib;
 
     uint8_t  rex_w, rex_r, rex_x, rex_b;
+    uint8_t  rex_r4, rex_x4, rex_b4;   // APX REX2 EGPR bits (index bit 4)
     uint8_t  vex_pp;         // 0=none, 1=66, 2=F3, 3=F2
     uint8_t  vex_l;          // L or L'L
     uint8_t  vex_vvvv;       // decoded (non-inverted) vvvv, 0..31
@@ -247,6 +279,7 @@ int __cdecl xde_asm(uint8_t *opcode, const struct xde_instr *diza);
 // Debug printers (optional). output should be at least 256 bytes.
 void __cdecl xde_sprintfl(char *output, uint64_t fl);
 void __cdecl xde_sprintset(char *output, uint64_t set);
+void __cdecl xde_sprintset2(char *output, uint64_t set2);
 
 #if defined(_MSC_VER)
 #pragma warning(pop)

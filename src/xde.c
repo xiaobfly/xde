@@ -37,7 +37,10 @@ static int peek_byte(const xde_cur *c, unsigned off, uint8_t *out)
     return 1;
 }
 
-static uint64_t gp_set(int sz, unsigned reg, int rex)
+// Map (size, register number, REX-present) to one object-set bit.
+// regs 16..31 are APX EGPRs and are reported through *egpr, which points into
+// the second set word; pass NULL where EGPR cannot occur (fixed registers).
+static uint64_t gp_set(int sz, unsigned reg, int rex, uint64_t *egpr)
 {
     static const uint64_t lo8_norex[8] = {
         XSET_AL, XSET_CL, XSET_DL, XSET_BL,
@@ -45,7 +48,7 @@ static uint64_t gp_set(int sz, unsigned reg, int rex)
     };
     static const uint64_t lo8_rex[8] = {
         XSET_AL, XSET_CL, XSET_DL, XSET_BL,
-        XSET_SP, XSET_BP, XSET_SI, XSET_DI
+        XSET_SPL, XSET_BPL, XSET_SIL, XSET_DIL
     };
     static const uint64_t w16[8] = {
         XSET_AX, XSET_CX, XSET_DX, XSET_BX,
@@ -60,8 +63,13 @@ static uint64_t gp_set(int sz, unsigned reg, int rex)
         XSET_RSP, XSET_RBP, XSET_RSI, XSET_RDI
     };
 
-    if (reg >= 16)
-        return XSET_OTHER;
+    if (reg >= 16) {
+        if (reg > 31)
+            return XSET_OTHER;
+        if (egpr)
+            *egpr |= XSET2_R16 << (reg - 16);
+        return 0;
+    }
     if (reg >= 8)
         return XSET_R8 << (reg - 8);
 
@@ -248,6 +256,9 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     int dsz = sz;
     uint8_t c = diza->opcode;
     uint8_t c2 = diza->opcode2;
+    // ModR/M.reg with its REX/REX2 extension bits (r16-r31 need bit 4).
+    unsigned regx = ((unsigned)diza->rex_r4 << 4) |
+                    ((unsigned)diza->rex_r << 3) | reg;
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -259,10 +270,13 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         diza->src_set |= XSET_OTHER;
         diza->dst_set |= XSET_OTHER;
         if (diza->vex_vvvv != 0 && diza->vex_vvvv != 0xF) {
-            if (attr & XA_VVVV_GPR)
-                diza->src_set |= gp_set(dsz, diza->vex_vvvv, 1);
-            else
+            if (attr & XA_VVVV_GPR) {
+                uint64_t v2 = 0;
+                diza->src_set |= gp_set(dsz, diza->vex_vvvv, 1, &v2);
+                diza->src_set2 |= v2;
+            } else {
                 diza->src_set |= XSET_OTHER;
+            }
         }
     }
 
@@ -270,44 +284,66 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF ||
                        (c2 >= 0x40 && c2 <= 0x4F) || c2 == 0xAF || c2 == 0xBC || c2 == 0xBD ||
                        c2 == 0xB8))) {
-        diza->dst_set |= (diza->enc == XDE_ENC_LEGACY || (attr & XA_VVVV_GPR))
-                       ? gp_set(dsz, ((unsigned)diza->rex_r << 3) | reg, rex)
-                       : XSET_OTHER;
+        if (diza->enc == XDE_ENC_LEGACY || diza->enc == XDE_ENC_REX2 ||
+            (attr & XA_VVVV_GPR)) {
+            uint64_t g2 = 0;
+            diza->dst_set |= gp_set(dsz, regx, rex, &g2);
+            diza->dst_set2 |= g2;
+        } else {
+            diza->dst_set |= XSET_OTHER;
+        }
     }
     if (c == 0x89 || c == 0x88) {
-        diza->src_set |= gp_set(sz, ((unsigned)diza->rex_r << 3) | reg, rex);
+        uint64_t g2 = 0;
+        diza->src_set |= gp_set(sz, regx, rex, &g2);
+        diza->src_set2 |= g2;
     }
     if ((c <= 0x3D) && ((c & 7) <= 3) && diza->map == XDE_MAP_LEGACY) {
         unsigned form = c & 7;
-        uint64_t rset = gp_set((form & 1) ? dsz : 1, ((unsigned)diza->rex_r << 3) | reg, rex);
+        uint64_t rset2 = 0;
+        uint64_t rset = gp_set((form & 1) ? dsz : 1, regx, rex, &rset2);
         if (form == 0 || form == 1) {
             diza->src_set |= rset;
+            diza->src_set2 |= rset2;
             diza->dst_set |= XSET_FL;
         } else if (form == 2 || form == 3) {
             diza->src_set |= rset;
+            diza->src_set2 |= rset2;
             diza->dst_set |= rset | XSET_FL;
+            diza->dst_set2 |= rset2;
         }
     }
 
     if (mod == 3) {
-        unsigned rmreg = ((unsigned)diza->rex_b << 3) | rm;
-        uint64_t rset = gp_set(sz, rmreg, rex);
+        unsigned rmreg = ((unsigned)diza->rex_b4 << 4) |
+                         ((unsigned)diza->rex_b << 3) | rm;
+        uint64_t rset2 = 0;
+        uint64_t rset = gp_set(sz, rmreg, rex, &rset2);
         if (diza->mode == 64 && sz == 4)
-            rset = gp_set(8, rmreg, rex);
-        if (diza->enc != XDE_ENC_LEGACY && !(attr & XA_VVVV_GPR))
+            rset = gp_set(8, rmreg, rex, &rset2);
+        if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2 &&
+            !(attr & XA_VVVV_GPR)) {
             rset = XSET_OTHER;
-        if (c != 0x8D)
+            rset2 = 0;
+        }
+        if (c != 0x8D) {
             diza->src_set |= rset;
+            diza->src_set2 |= rset2;
+        }
         // dest of r/m for ALU, MOV r/m, shifts, etc.
         if (diza->map == XDE_MAP_LEGACY &&
             ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
              c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||
              (c >= 0xD0 && c <= 0xD3) || c == 0xF6 || c == 0xF7 ||
-             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83)))
+             c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83))) {
             diza->dst_set |= rset;
+            diza->dst_set2 |= rset2;
+        }
         if (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF)) {
             int srcsz = (c2 == 0xB6 || c2 == 0xBE) ? 1 : 2;
-            diza->src_set |= gp_set(srcsz, rmreg, rex);
+            uint64_t m2 = 0;
+            diza->src_set |= gp_set(srcsz, rmreg, rex, &m2);
+            diza->src_set2 |= m2;
         }
     } else {
         if (c != 0x8D) {
@@ -321,7 +357,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
              c == 0xFE || c == 0xFF || (c >= 0x80 && c <= 0x83) ||
              c == 0xC6 || c == 0xC7))
             diza->dst_set |= XSET_MEM;
-        else if (diza->enc != XDE_ENC_LEGACY)
+        else if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2)
             diza->src_set |= XSET_MEM;
     }
 }
@@ -337,42 +373,72 @@ static void apply_implicit_gp(struct xde_instr *diza, uint32_t attr)
     if (diza->map != XDE_MAP_LEGACY && diza->map != XDE_MAP_0F)
         return;
 
+    // opcode+r forms take bit 4 of the register number from B4 (APX); the XCHG
+    // form names its second register from R4/R.
+    unsigned rop = ((unsigned)diza->rex_b4 << 4) |
+                   ((unsigned)diza->rex_b << 3) | (unsigned)(c & 7);
+    unsigned rrr = ((unsigned)diza->rex_r4 << 4) |
+                   ((unsigned)diza->rex_r << 3);
+
     if (diza->map == XDE_MAP_LEGACY) {
         if ((c & 0xF8) == 0x40 || (c & 0xF8) == 0x48) { // INC/DEC r
-            xset = gp_set(dsz, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
+            uint64_t g2 = 0;
+            xset = gp_set(dsz, rop, rex, &g2);
             diza->src_set |= xset;
+            diza->src_set2 |= g2;
             diza->dst_set |= xset | XSET_FL;
+            diza->dst_set2 |= g2;
         }
-        if ((c & 0xF8) == 0x50)
-            diza->src_set |= gp_set(dsz, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
-        if ((c & 0xF8) == 0x58)
-            diza->dst_set |= gp_set(dsz, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
+        if ((c & 0xF8) == 0x50) {
+            uint64_t g2 = 0;
+            diza->src_set |= gp_set(dsz, rop, rex, &g2);
+            diza->src_set2 |= g2;
+        }
+        if ((c & 0xF8) == 0x58) {
+            uint64_t g2 = 0;
+            diza->dst_set |= gp_set(dsz, rop, rex, &g2);
+            diza->dst_set2 |= g2;
+        }
         if ((c & 0xF8) == 0x90 && c != 0x90) {
-            xset = gp_set(dsz, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
-            diza->src_set |= xset | gp_set(dsz, ((unsigned)diza->rex_r << 3), rex);
-            diza->dst_set |= xset | gp_set(dsz, ((unsigned)diza->rex_r << 3), rex);
+            uint64_t a2 = 0, b2 = 0, yset;
+            xset = gp_set(dsz, rop, rex, &a2);
+            yset = gp_set(dsz, rrr, rex, &b2);
+            diza->src_set |= xset | yset;
+            diza->dst_set |= xset | yset;
+            diza->src_set2 |= a2 | b2;
+            diza->dst_set2 |= a2 | b2;
         }
-        if ((c & 0xF8) == 0xB0)
-            diza->dst_set |= gp_set(1, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
-        if ((c & 0xF8) == 0xB8)
-            diza->dst_set |= gp_set(dsz, (c & 7) | ((unsigned)diza->rex_b << 3), rex);
+        if ((c & 0xF8) == 0xB0) {
+            uint64_t g2 = 0;
+            diza->dst_set |= gp_set(1, rop, rex, &g2);
+            diza->dst_set2 |= g2;
+        }
+        if ((c & 0xF8) == 0xB8) {
+            uint64_t g2 = 0;
+            diza->dst_set |= gp_set(dsz, rop, rex, &g2);
+            diza->dst_set2 |= g2;
+        }
         if ((c & 7) == 4 && c < 0x3E) { // ALU AL, Ib
             diza->src_set |= XSET_AL;
             diza->dst_set |= XSET_AL | XSET_FL;
             if (c >= 0x38) diza->dst_set &= ~XSET_AL;
         }
         if ((c & 7) == 5 && c < 0x3E) {
-            xset = gp_set(dsz, 0, rex);
+            xset = gp_set(dsz, 0, rex, NULL);
             diza->src_set |= xset;
             diza->dst_set |= xset | XSET_FL;
             if (c >= 0x38) diza->dst_set &= ~xset;
         }
     }
     if (diza->map == XDE_MAP_0F && (diza->opcode2 & 0xF8) == 0xC8) {
-        unsigned r = (diza->opcode2 & 7) | ((unsigned)diza->rex_b << 3);
-        xset = gp_set(dsz, r, 1);
+        unsigned r = (diza->opcode2 & 7) | ((unsigned)diza->rex_b << 3) |
+                     ((unsigned)diza->rex_b4 << 4);
+        uint64_t g2 = 0;
+        xset = gp_set(dsz, r, 1, &g2);
         diza->src_set |= xset;
         diza->dst_set |= xset;
+        diza->src_set2 |= g2;
+        diza->dst_set2 |= g2;
     }
 
     xset = stack_set(diza->mode);
@@ -422,28 +488,39 @@ static int parse_modrm(xde_cur *cur, struct xde_instr *diza, uint32_t attr)
             {
                 unsigned base = sib & 7;
                 unsigned index = (sib >> 3) & 7;
-                if (mod == 0 && base == 5)
+                // With APX B4, the "no base" encoding (mod 0, base 5) names a
+                // real register (r21), so it needs no disp32.
+                if (mod == 0 && base == 5 && !diza->rex_b4)
                     disp = 4;
-                if (diza->enc != XDE_ENC_LEGACY && !(attr & XA_VVVV_GPR))
+                if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2 &&
+                    !(attr & XA_VVVV_GPR))
                     diza->src_set |= XSET_OTHER;
                 else {
-                    if (!(mod == 0 && base == 5) || diza->rex_b)
+                    uint64_t b2 = 0, i2 = 0;
+                    if (!(mod == 0 && base == 5 && !diza->rex_b4) ||
+                        diza->rex_b || diza->rex_b4)
                         diza->src_set |= gp_set((int)addr,
-                            ((unsigned)diza->rex_b << 3) | base, 1);
-                    if (index != 4 || diza->rex_x)
+                            ((unsigned)diza->rex_b4 << 4) |
+                            ((unsigned)diza->rex_b << 3) | base, 1, &b2);
+                    if (index != 4 || diza->rex_x || diza->rex_x4)
                         diza->src_set |= gp_set((int)addr,
-                            ((unsigned)diza->rex_x << 3) | index, 1);
+                            ((unsigned)diza->rex_x4 << 4) |
+                            ((unsigned)diza->rex_x << 3) | index, 1, &i2);
+                    diza->src_set2 |= b2 | i2;
                 }
             }
-        } else if (mod == 0 && rm == 5) {
+        } else if (mod == 0 && rm == 5 && !diza->rex_b4) {
             disp = 4;
             if (addr == 8) {
                 diza->flag |= C_RIPREL;
                 diza->src_set |= XSET_RIP;
             }
         } else {
+            uint64_t b2 = 0;
             diza->src_set |= gp_set((int)addr,
-                ((unsigned)diza->rex_b << 3) | rm, 1);
+                ((unsigned)diza->rex_b4 << 4) |
+                ((unsigned)diza->rex_b << 3) | rm, 1, &b2);
+            diza->src_set2 |= b2;
         }
 
         if (mod == 1)
@@ -617,6 +694,13 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
         diza->rex_r = (uint8_t)((b1 >> 2) & 1);
         diza->rex_x = (uint8_t)((b1 >> 1) & 1);
         diza->rex_b = (uint8_t)(b1 & 1);
+        // R4/X4/B4: bit 4 of ModRM.reg / SIB.index / r/m (EGPR r16-r31).
+        diza->rex_r4 = (uint8_t)((b1 >> 6) & 1);
+        diza->rex_x4 = (uint8_t)((b1 >> 5) & 1);
+        diza->rex_b4 = (uint8_t)((b1 >> 4) & 1);
+        // REX2 counts as a REX prefix for register naming, so r/m 4-7 in
+        // 8-bit form is SPL/BPL/SIL/DIL and never AH/CH/DH/BH.
+        diza->rex = (uint8_t)(0x40 | (b1 & 0x0F));
         if (diza->rex_w)
             diza->defdata = 8;
         cur.p += 2;
@@ -837,8 +921,8 @@ got_opcode:
         }
         if (diza->opcode == 0xF7 && diza->map == XDE_MAP_LEGACY) {
             int sz = (int)diza->defdata;
-            uint64_t acc = gp_set(sz, 0, diza->rex != 0);
-            uint64_t dx  = gp_set(sz, 2, diza->rex != 0);
+            uint64_t acc = gp_set(sz, 0, diza->rex != 0, NULL);
+            uint64_t dx  = gp_set(sz, 2, diza->rex != 0, NULL);
             if (reg == 4 || reg == 5) {
                 diza->src_set |= acc;
                 diza->dst_set |= acc | dx | XSET_FL;
@@ -874,6 +958,8 @@ got_opcode:
     if (attr & XA_UNDEF) {
         diza->src_set = XSET_UNDEF;
         diza->dst_set = XSET_UNDEF;
+        diza->src_set2 = XSET2_ALL;
+        diza->dst_set2 = XSET2_ALL;
     }
 
     dbytes = imm_bytes(attr, diza);

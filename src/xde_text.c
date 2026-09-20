@@ -67,18 +67,22 @@ void __cdecl xde_sprintset(char *output, uint64_t set)
     if ((set & XSET_RSP) == XSET_RSP) strcat(output, "RSP|");
     else if ((set & XSET_ESP) == XSET_ESP) strcat(output, "ESP|");
     else if (set & XSET_SP) strcat(output, "SP|");
+    else if (set & XSET_SPL) strcat(output, "SPL|");
 
     if ((set & XSET_RBP) == XSET_RBP) strcat(output, "RBP|");
     else if ((set & XSET_EBP) == XSET_EBP) strcat(output, "EBP|");
     else if (set & XSET_BP) strcat(output, "BP|");
+    else if (set & XSET_BPL) strcat(output, "BPL|");
 
     if ((set & XSET_RSI) == XSET_RSI) strcat(output, "RSI|");
     else if ((set & XSET_ESI) == XSET_ESI) strcat(output, "ESI|");
     else if (set & XSET_SI) strcat(output, "SI|");
+    else if (set & XSET_SIL) strcat(output, "SIL|");
 
     if ((set & XSET_RDI) == XSET_RDI) strcat(output, "RDI|");
     else if ((set & XSET_EDI) == XSET_EDI) strcat(output, "EDI|");
     else if (set & XSET_DI) strcat(output, "DI|");
+    else if (set & XSET_DIL) strcat(output, "DIL|");
 
     if (set & XSET_R8)  strcat(output, "R8|");
     if (set & XSET_R9)  strcat(output, "R9|");
@@ -94,6 +98,33 @@ void __cdecl xde_sprintset(char *output, uint64_t set)
     if (set & XSET_MEM)   strcat(output, "M|");
     if (set & XSET_OTHER) strcat(output, "other|");
     if (set & XSET_DEV)   strcat(output, "dev|");
+
+    if (output[0] && output[strlen(output) - 1] == '|')
+        output[strlen(output) - 1] = 0;
+}
+
+// APX extended GPRs (src_set2 / dst_set2).
+void __cdecl xde_sprintset2(char *output, uint64_t set2)
+{
+    static const char *names[16] = {
+        "R16", "R17", "R18", "R19", "R20", "R21", "R22", "R23",
+        "R24", "R25", "R26", "R27", "R28", "R29", "R30", "R31"
+    };
+    unsigned i;
+
+    output[0] = 0;
+
+    if (set2 == XSET2_ALL) {
+        strcat(output, "???");
+        return;
+    }
+
+    for (i = 0; i < 16; i++) {
+        if (set2 & (XSET2_R16 << i)) {
+            strcat(output, names[i]);
+            strcat(output, "|");
+        }
+    }
 
     if (output[0] && output[strlen(output) - 1] == '|')
         output[strlen(output) - 1] = 0;
