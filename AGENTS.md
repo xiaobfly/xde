@@ -23,7 +23,7 @@ XDE 2.00（作者 Fyyre）——eXtended disassembler engine。覆盖 x86 / x86-
 
 反向的 `xde_asm` 把结构拼回字节。`src/xde_text.c` 只把 flag / 对象集渲染成可读串（调试用）。
 
-设计取舍（沿自 1.02，见 `xde102/xde.txt:22-45`）：
+设计取舍（沿自 1.02，见 `xde102/xde.txt:16-44`）：
 
 - **不区分** segment / FPU / MMX / XMM / YMM / ZMM / CR / DR / K 寄存器，统一折叠为 `XSET_OTHER` 一个位；
 - **不区分**内存地址。`mov [eax], ebx` 与 `push ecx` 都只给 `XSET_MEM`。理由是面向静态文件分析，寄存器值未知，无法判断 `eax == esp` 之类的别名；
@@ -35,11 +35,11 @@ XDE 2.00（作者 Fyyre）——eXtended disassembler engine。覆盖 x86 / x86-
 
 | 函数 | 语义 |
 |------|------|
-| `int xde_disasm(const uint8_t *opcode, struct xde_instr *diza)` | 64 位模式解码（`src/xde.c:1032`） |
-| `int xde_disasm_ex(const uint8_t *opcode, struct xde_instr *diza, unsigned mode)` | 指定 16/32/64（`src/xde.c:1027`） |
-| `int xde_disasm_buf(const uint8_t *opcode, unsigned max_len, struct xde_instr *diza, unsigned mode)` | 额外限制读取上限（`src/xde.c:615`） |
-| `int xde_asm(uint8_t *opcode, const struct xde_instr *diza)` | 结构 → 字节；`return xde_asm_buf(opcode, XDE_MAXLEN, diza);` 的包装（`src/xde.c:1117`） |
-| `int xde_asm_buf(uint8_t *opcode, unsigned max_len, const struct xde_instr *diza)` | 结构 → 字节，额外限制写入上限；装不下返回 0（`src/xde.c:1066`） |
+| `int xde_disasm(const uint8_t *opcode, struct xde_instr *diza)` | 64 位模式解码（`src/xde.c:1035`） |
+| `int xde_disasm_ex(const uint8_t *opcode, struct xde_instr *diza, unsigned mode)` | 指定 16/32/64（`src/xde.c:1030`） |
+| `int xde_disasm_buf(const uint8_t *opcode, unsigned max_len, struct xde_instr *diza, unsigned mode)` | 额外限制读取上限（`src/xde.c:613`） |
+| `int xde_asm(uint8_t *opcode, const struct xde_instr *diza)` | 结构 → 字节；`return xde_asm_buf(opcode, XDE_MAXLEN, diza);` 的包装（`src/xde.c:1120`） |
+| `int xde_asm_buf(uint8_t *opcode, unsigned max_len, const struct xde_instr *diza)` | 结构 → 字节，额外限制写入上限；装不下返回 0（`src/xde.c:1069`） |
 | `void xde_sprintfl(char *output, uint64_t fl)` | flag → 串，缓冲区 ≥256 字节（`src/xde_text.c:7`，实测最坏 227 字节） |
 | `void xde_sprintset(char *output, uint64_t set)` | 对象集 → 串，缓冲区 ≥256 字节（`src/xde_text.c:51`，实测最坏 79 字节） |
 | `void xde_sprintset2(char *output, uint64_t set2)` | 第二对象集字 → 串，缓冲区 ≥256 字节（声明 `include/xde.h:296`，实现 `src/xde_text.c:132`，实测最坏 97 字节） |
@@ -67,14 +67,14 @@ m = xde_asm_buf(out, out_len, &diza);		// 0 if the struct needs more
 
 ```
 consumer
-  └─ xde_disasm / xde_disasm_ex            (src/xde.c:1032 / :1027, 只差默认参数)
-       └─ xde_disasm_buf(ptr, max_len, d, mode)   ← 唯一真正的入口 (src/xde.c:615-1025)
-            ├─ xde_attr[map][opcode]      (查表, :904)  ← src/xdetbl.c 生成
-            ├─ xde_group[gid][modrm.reg]  (二次查表, :932)
-            └─ parse_modrm (:489) → apply_modrm_usage (:276)
+  └─ xde_disasm / xde_disasm_ex            (src/xde.c:1035 / :1030, 只差默认参数)
+       └─ xde_disasm_buf(ptr, max_len, d, mode)   ← 唯一真正的入口 (src/xde.c:613-1028)
+            ├─ xde_attr[map][opcode]      (查表, :902)  ← src/xdetbl.c 生成
+            ├─ xde_group[gid][modrm.reg]  (二次查表, :930)
+            └─ parse_modrm (:487) → apply_modrm_usage (:274)
                                   → apply_usage_special (:146)
-                                  → apply_implicit_gp (:399)
-  └─ xde_asm(out, d) → xde_asm_buf(out, XDE_MAXLEN, d)   (src/xde.c:1117 / :1066-1115, 纯字节重组)
+                                  → apply_implicit_gp (:397)
+  └─ xde_asm(out, d) → xde_asm_buf(out, XDE_MAXLEN, d)   (src/xde.c:1120 / :1069-1118, 纯字节重组)
 ```
 
 `src/xde.c` 共 18 个函数：5 个导出 + 13 个 `static`。无全局可变状态，无堆分配。
@@ -83,47 +83,49 @@ consumer
 
 | # | 阶段 | 行 |
 |---|------|-----|
-| 1 | 入参守卫：空指针 → 0；`mode ∉ {16,32,64}` → 0；`max_len` 0/超限一律夹到 15 | `:626-633` |
-| 2 | `memset` 清零 + 预置 `mode` / `defaddr` / `defdata` | `:635-638` |
-| 3 | 游标初始化 `beg`/`p`/`end` | `:640-642` |
-| 4 | `C_BAD` 启发式 | `:644-648` |
-| 5 | 遗留前缀循环 | `:650-697` |
-| 6 | 取下一个字节 | `:699-701` |
-| 7 | REX（`40-4F`，仅 64 位） | `:703-715` |
-| 8 | REX2（`D5`，仅 64 位） | `:717-748` |
-| 9 | EVEX（`62`） | `:750-799` |
-| 10 | VEX（`C4`/`C5`） | `:801-859` |
-| 11 | XOP（`8F`） | `:861-894` |
-| 12 | 遗留 opcode + `enc = XDE_ENC_LEGACY` | `:896-899` |
-| 13 | 汇合点标签 `got_opcode:` | `:901` |
-| 14 | map 越界检查 + `attr = xde_attr[map][mop]` | `:902-904` |
-| 15 | 三种拒绝：`XA_INVALID` → 0；`XA_I64 && mode==64` → 0；`XA_O64 && mode!=64` → 0 | `:906-911` |
-| 16 | `apply_attr_flags`：`XA_*` → `C_*` 映射（**`C_REL` 的唯一来源**，收尾不再重复置位） | `:913`（实现 `:123-144`） |
-| 17 | `XA_GROUP` 强制 `XA_MODRM`，并就地补置 `C_MODRM`（`apply_attr_flags` 已经跑过） | `:916-921` |
-| 18 | peek ModR/M，取 `reg = (mpeek >> 3) & 7` | `:923-928` |
-| 19 | group 二次查表：`xde_group[gid][reg]` 再跑一次 `apply_attr_flags` | `:929-936` |
-| 20 | 硬编码特例（移位计数 / `C6 C7 8F` / `F6` / `F7`） | `:937-970` |
-| 21 | `parse_modrm` + `apply_modrm_usage` | `:972-975` |
-| 22 | MOFFS 路径（非 ModR/M 的 `A0-A3` 等） | `:976-989` |
-| 23 | `apply_usage_special` / `apply_implicit_gp` | `:991-992` |
-| 24 | `XA_UNDEF` → `src_set = dst_set = XSET_UNDEF`、`src_set2 = dst_set2 = XSET2_ALL`（**赋值，非 OR**） | `:994-999` |
-| 25 | `imm_bytes` 定长 → 拷贝到 `data_b` + `C_DATA*` | `:1001-1014` |
-| 26 | 收尾：`len = cur.p - opcode`；`0` 或 `>15` → 0；置 `len`；返回 | `:1018-1024` |
+| 1 | 入参守卫：空指针 → 0；`mode ∉ {16,32,64}` → 0；`max_len` 0/超限一律夹到 15 | `:624-631` |
+| 2 | `memset` 清零 + 预置 `mode` / `defaddr` / `defdata` | `:633-636` |
+| 3 | 游标初始化 `beg`/`p`/`end` | `:638-640` |
+| 4 | `C_BAD` 启发式 | `:642-646` |
+| 5 | 遗留前缀循环 | `:648-695` |
+| 6 | 取下一个字节 | `:697-699` |
+| 7 | REX（`40-4F`，仅 64 位） | `:701-713` |
+| 8 | REX2（`D5`，仅 64 位） | `:715-746` |
+| 9 | EVEX（`62`） | `:748-797` |
+| 10 | VEX（`C4`/`C5`） | `:799-857` |
+| 11 | XOP（`8F`） | `:859-892` |
+| 12 | 遗留 opcode + `enc = XDE_ENC_LEGACY` | `:894-897` |
+| 13 | 汇合点标签 `got_opcode:` | `:899` |
+| 14 | map 越界检查 + `attr = xde_attr[map][mop]` | `:900-902` |
+| 15 | 三种拒绝：`XA_INVALID` → 0；`XA_I64 && mode==64` → 0；`XA_O64 && mode!=64` → 0 | `:904-909` |
+| 16 | `apply_attr_flags`：`XA_*` → `C_*` 映射（**`C_REL` 的唯一来源**，收尾不再重复置位） | `:911`（实现 `:123-144`） |
+| 17 | `XA_GROUP` 强制 `XA_MODRM`，并就地补置 `C_MODRM`（`apply_attr_flags` 已经跑过） | `:913-919` |
+| 18 | peek ModR/M，取 `reg = (mpeek >> 3) & 7` | `:921-926` |
+| 19 | group 二次查表：`xde_group[gid][reg]` 再跑一次 `apply_attr_flags` | `:927-933` |
+| 20 | 硬编码特例：移位组 `C0 C1 D0-D3` 写 FL（`RCL`/`RCR` 另读 FL、`D2`/`D3` 另读 CL）／`C6 C7 8F` 的 `C_BAD`／`F6`/`F7` 的标志与 `MUL`/`DIV` 累加器规则 | `:935-973` |
+| 21 | `parse_modrm` + `apply_modrm_usage` | `:975-978` |
+| 22 | MOFFS 路径（非 ModR/M 的 `A0-A3` 等） | `:979-992` |
+| 23 | `apply_usage_special` / `apply_implicit_gp` | `:994-995` |
+| 24 | `XA_UNDEF` → `src_set = dst_set = XSET_UNDEF`、`src_set2 = dst_set2 = XSET2_ALL`（**赋值，非 OR**） | `:997-1001` |
+| 25 | `imm_bytes` 定长 → 拷贝到 `data_b` + `C_DATA*` | `:1004-1017` |
+| 26 | 收尾：`len = cur.p - opcode`；`0` 或 `>15` → 0；置 `len`；返回 | `:1021-1027` |
 
-**3DNow 没有特例分支**：表把尾随 opcode 字节建模成 `XA_IMM_IB`，`XA_3DNOW` 只负责置 `C_3DNOW`（收尾注释 `:1016-1017`，现在是准确描述而非待办）。
+**3DNow 没有特例分支**：表把尾随 opcode 字节建模成 `XA_IMM_IB`，`XA_3DNOW` 只负责置 `C_3DNOW`（收尾注释 `:1019-1020`，现在是准确描述而非待办）。
 
-**`rex` 口径统一**：`apply_modrm_usage`（`:279`）与 `apply_implicit_gp`（`:402`）都用 `(diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY)`，8 位寄存器命名不会因走哪一趟而不同。`gp_set` 对 `sz ∉ {1,2,4,8}` 返回 `XSET_OTHER`（`:89`），不会冒充 64 位。
+**移位组与组 3 都写标志**：legacy map 的 `C0`/`C1`/`D0-D3`（八个操作）一律 `dst_set |= XSET_FL`；`reg == 2 || 3`（`RCL`/`RCR`）另加 `src_set |= XSET_FL`（读 CF），`D2`/`D3` 另加 `src_set |= XSET_CL`。`F6`/`F7` 在 `reg != 2` 时 `dst_set |= XSET_FL`（`NOT`(/2) 不写标志），`/4`-`/7` 的累加器规则不变（`:935-973`）。这与 ALU 路径一致（`:334`/`:338`/`:421`/`:455`/`:461`）：凡写标志都要在 `dst_set` 里出现 `XSET_FL`。
+
+**`rex` 口径统一**：`apply_modrm_usage`（`:277`）与 `apply_implicit_gp`（`:400`）都用 `(diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY)`，8 位寄存器命名不会因走哪一趟而不同。`gp_set` 对 `sz ∉ {1,2,4,8}` 返回 `XSET_OTHER`（`:89`），不会冒充 64 位。
 
 **字节读取纪律**：所有读取都走 `cur_left`（`:17`）/ `get_byte`（`:24`）/ `peek_byte`（`:32`）。`cur_left` 双重夹取 `min(end - p, beg + XDE_MAXLEN - p)`；由于 `max_len` 已夹到 15，第二项实际永远不是较小者（死代码，但无害）。
 
 **`C_BAD` 的来源**（共 4 类）：
 
-1. 首两字节构成的 16 位小端字等于 `0x0000` 或 `0xFFFF`（`:644-648`）；
-2. 同一类遗留前缀**重复出现**（`66`/`67`/段/`F2F3`/`F0`，`:656`/`:664`/`:676`/`:683`/`:690`）；
+1. 首两字节构成的 16 位小端字等于 `0x0000` 或 `0xFFFF`（`:642-646`）；
+2. 同一类遗留前缀**重复出现**（`66`/`67`/段/`F2F3`/`F0`，`:658`/`:669`/`:677`/`:684`/`:691`）；
 3. 表属性 `XA_BAD`（映射见 `:130`）；
-4. `C6`/`C7`/`8F` 在 legacy map 下 `reg != 0`（`:945-947`）。
+4. `C6`/`C7`/`8F` 在 legacy map 下 `reg != 0`（`:944-946`）。
 
-**前缀语义**：`66` 翻转 `defdata` 2↔4（`:658`）；`67` 在 64 位翻转 `defaddr` 8↔4、其余模式 2↔4（`:666-669`）；段前缀存 `p_seg`、`F2/F3` 存 `p_rep`、`F0` 存 `p_lock`。**每类只保留最后见到的字节**。注意前缀循环在 REX 判定**之前**跑完且 REX 只判一次，所以 `48 66 90` 会把 `48` 当 REX、再把 `66` 当 opcode——解码侧不拒绝非规范前缀顺序，但**重编码会按 SDM 组序规范化**（见 Known Gaps）。
+**前缀语义**：`66` 翻转 `defdata` 2↔4（`:656`）；`67` 在 64 位翻转 `defaddr` 8↔4、其余模式 2↔4（`:664-667`）；段前缀存 `p_seg`、`F2/F3` 存 `p_rep`、`F0` 存 `p_lock`。**每类只保留最后见到的字节**。注意前缀循环在 REX 判定**之前**跑完且 REX 只判一次，所以 `48 66 90` 会把 `48` 当 REX、再把 `66` 当 opcode——解码侧不拒绝非规范前缀顺序，但**重编码会按 SDM 组序规范化**（见 Known Gaps）。
 
 ### 编码类分派与歧义消解
 
@@ -131,14 +133,14 @@ consumer
 
 | 字节 | 两种解释 | 判定门槛 | 行 |
 |------|----------|----------|-----|
-| `62` | EVEX / BOUND | `peek(1..3)` 全成功 **且** `(b2 & 0x04)` **且**（`mode == 64` 或 `(b1 & 0xC0) == 0xC0`）→ 否则 BOUND | `:750-753` |
-| `C4` `C5` | VEX2/VEX3 / LES/LDS | `mode == 64` 或 `(b1 & 0xC0) == 0xC0`（`C4` 还需第三字节）→ 否则 LES/LDS | `:801-804` |
-| `8F` | XOP / POP r/m | `(b1 & 0x1F) >= 8` **且**（`mode == 64` 或 `(b1 & 0xC0) == 0xC0`）→ 否则 `8F /0` = POP r/m | `:865` |
-| `D5` | REX2 (APX) / AAD | 仅 64 位且 `b == 0xD5` → 否则按 AAD 走 legacy | `:717-748` |
+| `62` | EVEX / BOUND | `peek(1..3)` 全成功 **且** `(b2 & 0x04)` **且**（`mode == 64` 或 `(b1 & 0xC0) == 0xC0`）→ 否则 BOUND | `:750-751` |
+| `C4` `C5` | VEX2/VEX3 / LES/LDS | `mode == 64` 或 `(b1 & 0xC0) == 0xC0`（`C4` 还需第三字节）→ 否则 LES/LDS | `:799-802` |
+| `8F` | XOP / POP r/m | `(b1 & 0x1F) >= 8` **且**（`mode == 64` 或 `(b1 & 0xC0) == 0xC0`）→ 否则 `8F /0` = POP r/m | `:863` |
+| `D5` | REX2 (APX) / AAD | 仅 64 位且 `b == 0xD5` → 否则按 AAD 走 legacy | `:715-746` |
 
 三个向量前缀门槛（`62` / `C4`+`C5` / `8F`）写法一致：64 位下无条件成立，16/32 位下要求 `mod == 11b` 或等价的 `0xC0` 掩码；因此 16/32 位里 `8F 08`（mod ≠ 11）不再被当作 XOP，而是走非法 POP（长度 2，`C_BAD` 置位）。
 
-门槛失败即落到 `parse_legacy_opcode`（定义 `:579`，调用 `:896-897`）。这就是 README 那句「`C4`/`C5`/`62`/`8F` 只有在后随字节符合前缀形式时才是 VEX/EVEX/XOP」的实现。
+门槛失败即落到 `parse_legacy_opcode`（定义 `:577`，调用 `:894-895`）。这就是 README 那句「`C4`/`C5`/`62`/`8F` 只有在后随字节符合前缀形式时才是 VEX/EVEX/XOP」的实现。
 
 各编码类写回的结构字段：
 
@@ -148,9 +150,9 @@ consumer
 | REX2 | `XDE_ENC_REX2` | 2 | `D5, b1` | `(b1 & 0x80) ? 0F : LEGACY` | 读 bit6/5/4 → `rex_r4`/`rex_x4`/`rex_b4`，并置 `diza->rex = 0x40 \| (b1 & 0x0F)`（对寄存器命名等价于 REX）；`C_REX2 \| C_REX` |
 | EVEX | `XDE_ENC_EVEX` | 4 | `62, P0, P1, P2` | `b1 & 7`（→ map 4-7） | `C_EVEX \| C_VEX`，`evex_r2/z/b/aaa`，`vex_vvvv` 含 `V'` 位；清 `p_66`/`p_rep` |
 | VEX | `XDE_ENC_VEX2`(C5) / `XDE_ENC_VEX3`(C4) | 2 / 3 | 全前缀头 | `0F`(C5) / `b1 & 0x1F`(C4) | `C_VEX`；清 `p_66`/`p_rep` |
-| XOP | `XDE_ENC_XOP` | 3 | `8F, b1, b2` | `b1 & 0x1F`（→ map 8-10） | `C_XOP`；清 `p_66`/`p_rep`（`:885-886`）；只写 `opcode`/`map`（`:890-891`） |
+| XOP | `XDE_ENC_XOP` | 3 | `8F, b1, b2` | `b1 & 0x1F`（→ map 8-10） | `C_XOP`；清 `p_66`/`p_rep`（`:883-884`）；只写 `opcode`/`map`（`:890-891`） |
 
-**`opcode2`/`opcode3` 的写入规则**：只有 `map ∈ {XDE_MAP_0F, XDE_MAP_0F38, XDE_MAP_0F3A}` 时才写（VEX `:848-856`、EVEX `:787-795`）；EVEX 的 map 4-7、VEX 的 map 7（`VEX7`）、XOP 的 map 8/9/A 都不写。XOP 与 VEX/EVEX 同一规则，不是缺口——`opcode`/`opcode2`/`opcode3` 只描述 `0F`/`0F 38`/`0F 3A` 这条链。
+**`opcode2`/`opcode3` 的写入规则**：只有 `map ∈ {XDE_MAP_0F, XDE_MAP_0F38, XDE_MAP_0F3A}` 时才写（VEX `:846-854`、EVEX `:785-793`）；EVEX 的 map 4-7、VEX 的 map 7（`VEX7`）、XOP 的 map 8/9/A 都不写。XOP 与 VEX/EVEX 同一规则，不是缺口——`opcode`/`opcode2`/`opcode3` 只描述 `0F`/`0F 38`/`0F 3A` 这条链。
 
 ### 表驱动层
 
@@ -171,7 +173,7 @@ consumer
 
 **整 32 位已占满**——新增一个属性位必须先把 `attr` 拓宽到 64 位（或复用现有位），并同步 4 处，见 Change Workflow。
 
-`XA_*` 到 `C_*` 的映射在 `apply_attr_flags`（`src/xde.c:123-144`）：17 条一对一 OR，**只增不减**（读-改-写 `diza->flag`）。`XA_VVVV_GPR` 与 group 位不经此函数（`XA_VVVV_GPR` 在 `:301`/`:316`/`:353`/`:530` 直接读，`XA_GRP_ID` 只在 `:930` 读）。
+`XA_*` 到 `C_*` 的映射在 `apply_attr_flags`（`src/xde.c:123-144`）：17 条一对一 OR，**只增不减**（读-改-写 `diza->flag`）。`XA_VVVV_GPR` 与 group 位不经此函数（`XA_VVVV_GPR` 在 `:299`/`:314`/`:351`/`:528` 直接读，`XA_GRP_ID` 只在 `:928` 读）。
 
 立即数尺寸表（`imm_bytes`，`src/xde.c:101-121`）：
 
@@ -186,27 +188,27 @@ consumer
 | `XA_IMM_ID` | 4 |
 | 其他 | 0 |
 
-尺寸→标志：1 → `C_DATA1`，2 → `C_DATA2`，**3 → `C_DATA1 \| C_DATA2`**，4 → `C_DATA4`，8 → `C_DATA8`，**6 → `C_DATA4 \| C_DATA2`**（`:1008-1013`）。
+尺寸→标志：1 → `C_DATA1`，2 → `C_DATA2`，**3 → `C_DATA1 \| C_DATA2`**，4 → `C_DATA4`，8 → `C_DATA8`，**6 → `C_DATA4 \| C_DATA2`**（`:1011-1016`）。
 
 ### 对象集推导（三趟）
 
-1. `apply_modrm_usage`（`:276-397`）——ModR/M 的 reg/r/m 字段。`mod == 3` 走寄存器分支，否则内存分支。`rex` 启发式在 `:279`：`rex != 0 || enc != LEGACY`（即 VEX/EVEX/XOP/REX2 一律当作「有 REX」，影响 8 位寄存器命名）。reg 字段带扩展位组成 `regx = rex_r4<<4 | rex_r<<3 | reg`（`:286-287`），r/m 侧同理用 `rex_b4`（`:346-347`）；`int setcc = (map == 0F && c == 0x0F && c2 ∈ 90..9F)` 在 `:288-289`。`mod == 3` 的寄存器分支里，`dst` 白名单 = ALU / `MOV r/m` / 移位 / `F6`/`F7` / `FE`/`FF` / `80-83` / **`C6`/`C7`** / **`SETcc`**（`:365-371`），而 `src` 赋值排除 `0x8D` **以及 MOV 存储形式 `0x88`/`0x89`/`0xC6`/`0xC7` 与 `SETcc`**（`:359-360`）——这几类只写 r/m，不读；内存分支同样处理（`src` 排除 `:382-385`、`dst` 白名单 `:386-392`）。
-2. `apply_usage_special`（`:146-274`）——隐式操作数：REP/串操作（`A4-A7`/`AA-AF`/`6C-6F`/`AC-AD`）、IO（`E4-E7`/`EC-EF`）、`SAHF/LAHF`、`CBW/CWD`、`AAA/AAS`、`AAM/AAD`、`PUSHA/POPA`、`PUSH/POP sreg`、`XLAT`、`ENTER/LEAVE`、`MOV` 段寄存器，以及 0F map 的 `CPUID`/`SHLD/SHRD`/`LSS` 等。**其 `attr` 形参未使用**（`(void)attr;` `:273`）。标志规则**按指令区分**（`:246-255`）：`A6/A7`（CMPS）、`AE/AF`（SCAS）、`FC/FD`（CLD/STD）→ `dst_set |= XSET_FL`；`p_rep` 且 `A6/A7/AE/AF` → `src_set |= XSET_FL`（REP 循环测 ZF）；`MOVS/STOS/LODS/INS/OUTS` 完全不动标志，**DF 有意不作为源**。`REP` 本身只把 `CX/ECX/RCX` 计入 `src`+`dst`（`:157-161`），不再无条件置 `XSET_FL`。0F 段的 `SETcc`（`c2 ∈ 90..9F`）读标志：`src_set |= XSET_FL`（`:268-270`）。
-3. `apply_implicit_gp`（`:399-487`）——opcode 隐含的 GPR：`INC/DEC r`、`PUSH/POP r`、`XCHG r8,eAX`、`MOV r,Iv`、`ALU AL/eAX, Iv`、`BSWAP`，外加 `XA_PUSH`/`XA_POP` 的栈列（`stack_set`：16 → `XSET_SP`，32 → `XSET_ESP`，64 → `XSET_RSP`，`:478-486`）。其 `rex` 判定在 `:402`，用的是与 `:279` **相同的** `(diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY)`。
+1. `apply_modrm_usage`（`:274-396`）——ModR/M 的 reg/r/m 字段。`mod == 3` 走寄存器分支，否则内存分支。`rex` 启发式在 `:277`：`rex != 0 || enc != LEGACY`（即 VEX/EVEX/XOP/REX2 一律当作「有 REX」，影响 8 位寄存器命名）。reg 字段带扩展位组成 `regx = rex_r4<<4 | rex_r<<3 | reg`（`:284-285`），r/m 侧同理用 `rex_b4`（`:344-345`）；`int setcc = (map == 0F && c == 0x0F && c2 ∈ 90..9F)` 在 `:287`。`mod == 3` 的寄存器分支里，`dst` 白名单 = ALU / `MOV r/m` / 移位 / `F6`/`F7` / `FE`/`FF` / `80-83` / **`C6`/`C7`** / **`SETcc`**（`:363-372`），而 `src` 赋值排除 `0x8D` **以及 MOV 存储形式 `0x88`/`0x89`/`0xC6`/`0xC7` 与 `SETcc`**（`:357-358`）——这几类只写 r/m，不读；内存分支同样处理（`src` 排除 `:380-383`、`dst` 白名单 `:384-391`）。
+2. `apply_usage_special`（`:146-273`）——隐式操作数：REP/串操作（`A4-A7`/`AA-AF`/`6C-6F`/`AC-AD`）、IO（`E4-E7`/`EC-EF`）、`SAHF/LAHF`、`CBW/CWD`、`AAA/AAS`、`AAM/AAD`、`PUSHA/POPA`、`PUSH/POP sreg`、`XLAT`、`ENTER/LEAVE`、`MOV` 段寄存器，以及 0F map 的 `CPUID`/`SHLD/SHRD`/`LSS` 等。**其 `attr` 形参未使用**（`(void)attr;` `:271`）。标志规则**按指令区分**（`:244-253`）：`A6/A7`（CMPS）、`AE/AF`（SCAS）、`FC/FD`（CLD/STD）→ `dst_set |= XSET_FL`；`p_rep` 且 `A6/A7/AE/AF` → `src_set |= XSET_FL`（REP 循环测 ZF）；`MOVS/STOS/LODS/INS/OUTS` 完全不动标志，**DF 有意不作为源**。`REP` 本身只把 `CX/ECX/RCX` 计入 `src`+`dst`（`:155-160`），不再无条件置 `XSET_FL`。0F 段的 `SETcc`（`c2 ∈ 90..9F`）读标志：`src_set |= XSET_FL`（`:266-268`）。I/O 的 DX 端口形式（`EC`/`ED`/`EE`/`EF`）四种都读 `DX`，因此**一律**记进 `src_set`——`EE`/`EF`（`OUT DX,AL/AX`）不进 `dst_set`；立即数端口形式 `E4-E7` 不含 `DX`（`:222-230`）。
+3. `apply_implicit_gp`（`:397-486`）——opcode 隐含的 GPR：`INC/DEC r`、`PUSH/POP r`、`XCHG r8,eAX`、`MOV r,Iv`、`ALU AL/eAX, Iv`、`BSWAP`，外加 `XA_PUSH`/`XA_POP` 的栈列（`stack_set`：16 → `XSET_SP`，32 → `XSET_ESP`，64 → `XSET_RSP`，`:476-484`）。其 `rex` 判定在 `:400`，用的是与 `:277` **相同的** `(diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY)`。
 
-**REX2 的 r/m 是 GPR，不是向量寄存器**：`parse_modrm` 的 SIB 分支（`:529-530`）与 `apply_modrm_usage` 的内存分支（`:394-395`）在判断「是否按向量寄存器记 `XSET_OTHER`」时都会排除 `XDE_ENC_REX2`；`mod == 3` 分支同样排除（`:352-356`）。另外 `parse_modrm` 的两个「无基址」判定——SIB 的 `mod == 0 && base == 5`（`:527`）与 `mod == 0 && rm == 5`（`:546`）——在 `rex_b4` 置位时不再成立，此时它指的是真寄存器 r21，不是 disp32。
+**REX2 的 r/m 是 GPR，不是向量寄存器**：`parse_modrm` 的 SIB 分支（`:527-529`）与 `apply_modrm_usage` 的内存分支（`:392-393`）在判断「是否按向量寄存器记 `XSET_OTHER`」时都会排除 `XDE_ENC_REX2`；`mod == 3` 分支同样排除（`:350-354`）。另外 `parse_modrm` 的两个「无基址」判定——SIB 的 `mod == 0 && base == 5`（`:525`）与 `mod == 0 && rm == 5`（`:544`）——在 `rex_b4` 置位时不再成立，此时它指的是真寄存器 r21，不是 disp32。
 
 `gp_set`（`:43-90`）的寄存器列映射：`reg > 31 → XSET_OTHER`（**解码路径不可达**，`reg` 由 5 位扩展位拼出，上限 31）；`reg >= 16` 交给其第 4 个形参 `uint64_t *egpr`——EGPR 写进**第二对象集字**（`*egpr |= XSET2_R16 << (reg - 16)`，`:66-72`），固定寄存器处传 `NULL`；`reg >= 8` 分两支：首字仍返回**宽度无关**的 `XSET_R8 << (reg-8)`，并且当 `sz <= 1`（8 位形式 r8b-r15b）时**额外**写入第二字的 `XSET2_R8B << (reg-8)`（`:73-79`）——即**叠加**而非替换：`XSET_R8..XSET_R15` 照旧，第二字另有 8 位宽度位；`sz <= 1` 时按 `rex` 选 `lo8_norex`（AL/CL/DL/BL/**AH/CH/DH/BH**）或 `lo8_rex`（AL/CL/DL/BL/**SPL/BPL/SIL/DIL**——独立的 `XSET_SPL/BPL/SIL/DIL` 位，不再复用 16 位那几位）；`sz` 2/4/8 → `w16`/`w32`/`w64`，**`sz ∉ {1,2,4,8}` 返回 `XSET_OTHER`，不冒充 64 位**（`:87-89`）。
 
 ### 编码方向（`xde_asm`）
 
-**不做校验、不解码**；`xde_asm_buf`（`src/xde.c:1066-1115`）只多做一次容量检查，`xde_asm`（`:1117-1120`）是 `return xde_asm_buf(opcode, XDE_MAXLEN, diza);` 的薄包装。固定顺序拼接：
+**不做校验、不解码**；`xde_asm_buf`（`src/xde.c:1069-1118`）只多做一次容量检查，`xde_asm`（`:1120-1123`）是 `return xde_asm_buf(opcode, XDE_MAXLEN, diza);` 的薄包装。固定顺序拼接：
 
 ```
-max_len 夹取：0 或 > XDE_MAXLEN 一律按 15                        (:1073-1074)
-→ 计数夹到数组容量：nvex ≤ 4 / naddr ≤ 8 / ndata ≤ 8            (:1077-1079)
-→ asm_size() 算所需字节数，> max_len 则 return 0                 (:1038-1064, :1081-1082)
-p_lock → p_rep → p_seg → p_66 → p_67    （SDM 组序 1→2→3→4，:1089-1093）
+max_len 夹取：0 或 > XDE_MAXLEN 一律按 15                        (:1076-1077)
+→ 计数夹到数组容量：nvex ≤ 4 / naddr ≤ 8 / ndata ≤ 8            (:1079-1082)
+→ asm_size() 算所需字节数，> max_len 则 return 0                 (:1041-1067, :1084-1085)
+p_lock → p_rep → p_seg → p_66 → p_67    （SDM 组序 1→2→3→4，:1092-1096）
   ├─ 若 nvex：vex[0..nvex-1] → opcode   （此路径不发 rex）
   └─ 否则：rex → opcode
              └─ 若 opcode == 0x0F：opcode2 →（若 opcode2 ∈ {38,3A}）opcode3
@@ -216,14 +218,14 @@ p_lock → p_rep → p_seg → p_66 → p_67    （SDM 组序 1→2→3→4，:1
 → ndata 个 data_b[]
 ```
 
-**容量安全**：`addrsize`/`datasize`/`nvex` 是 `uint8_t`，被写坏时解码侧的计数会越过 `addr_b[8]`/`data_b[8]`/`vex[4]`（真 UB）。`xde_asm_buf` 先把这三个计数夹到数组容量（`:1077-1079`），再用 `asm_size()`（`:1038-1064`）算出所需字节数，`> max_len` 就返回 `0`（`:1081-1082`）；`max_len == 0` 或 `> XDE_MAXLEN` 一律按 `XDE_MAXLEN` 处理（`:1073-1074`），与 `xde_disasm_buf` 的 `max_len` 处理同构。所以解码成功的指令（`len ≤ 15`）经 `xde_asm` 永远编得出来。
+**容量安全**：`addrsize`/`datasize`/`nvex` 是 `uint8_t`，被写坏时解码侧的计数会越过 `addr_b[8]`/`data_b[8]`/`vex[4]`（真 UB）。`xde_asm_buf` 先把这三个计数夹到数组容量（`:1079-1082`），再用 `asm_size()`（`:1041-1067`）算出所需字节数，`> max_len` 就返回 `0`（`:1084-1085`）；`max_len == 0` 或 `> XDE_MAXLEN` 一律按 `XDE_MAXLEN` 处理（`:1076-1077`），与 `xde_disasm_buf` 的 `max_len` 处理同构。所以解码成功的指令（`len ≤ 15`）经 `xde_asm` 永远编得出来。
 
-`p_66` 现在与其它遗留前缀一起在 `:1092` 统一发射（没有 nvex 专属分支）：这是为 REX2 准备的——REX2 是唯一**保留** `p_66`/`p_rep` 的编码类（VEX/EVEX/XOP 在解码时就清掉，`:817-818`/`:840-841`/`:780-781`/`:885-886`），而它们的 `vex[]` 头自带 pp 字段，不走 `p_66`；所以 `66 D5 …` 现在能字节级往返。
+`p_66` 现在与其它遗留前缀一起在 `:1095` 统一发射（没有 nvex 专属分支）：这是为 REX2 准备的——REX2 是唯一**保留** `p_66`/`p_rep` 的编码类（VEX/EVEX/XOP 在解码时就清掉，`:815-816`/`:838-839`/`:778-779`/`:883-884`），而它们的 `vex[]` 头自带 pp 字段，不走 `p_66`；所以 `66 D5 …` 现在能字节级往返。
 
 它只读 `nvex`/`vex[]`、`p_seg/p_lock/p_rep/p_67/p_66/rex`、`opcode/opcode2/opcode3`、`modrm`、`sib`、`addr_b+addrsize`、`data_b+datasize`，**完全不看 `map` / `enc` / `defdata` / `defaddr` / `len` / 对象集**。因此：
 
 - 手搓一个 `nvex == 0` 但 `map == XDE_MAP_0F38` 的结构体，`xde_asm_buf` 不会补出 `0F 38` 前缀——它只信字节字段；
-- 返回 `0` 只有两种情形：`!opcode || !diza`（`:1071-1072`），或所需字节数 `> max_len`（`:1081-1082`）；解码成功的指令不可能编出 0 字节。
+- 返回 `0` 只有两种情形：`!opcode || !diza`（`:1074-1075`），或所需字节数 `> max_len`（`:1084-1085`）；解码成功的指令不可能编出 0 字节。
 
 ### 设计不变量（改动前必读）
 
@@ -238,12 +240,12 @@ p_lock → p_rep → p_seg → p_66 → p_67    （SDM 组序 1→2→3→4，:1
 | 路径 | 用途 | 关键符号 |
 |------|------|----------|
 | `include/xde.h` | 唯一公共头（306 行）：宏词汇表 + `struct xde_instr`（`:214-276`） + 8 个 API（`:282-296`） | `XDE_MODE_*`, `XDE_ENC_*`, `XDE_MAP_*`, `C_*`, `XSET_*`, `XSET2_*` |
-| `src/xde.c` | 解码器 + 编码器（1120 行），全部核心逻辑 | `xde_disasm_buf:615`, `xde_asm_buf:1066`, `xde_asm:1117`, 13 个 static 助手 |
+| `src/xde.c` | 解码器 + 编码器（1123 行），全部核心逻辑 | `xde_disasm_buf:613`, `xde_asm_buf:1069`, `xde_asm:1120`, 13 个 static 助手 |
 | `src/xdetbl.c` | **机器生成**的属性表（414 行） | `xde_attr:5`, `xde_group:382` |
 | `src/xdetbl.h` | 手写的表层契约（86 行） | `XA_*`, `enum xde_group_id`, `XDE_MAP_COUNT 11` |
 | `src/xde_text.c` | 调试打印（165 行，3 个函数） | `xde_sprintfl:7`, `xde_sprintset:51`, `xde_sprintset2:132` |
 | `tools/gen_tables.py` | 表生成器（682 行），唯一写出 `src/xdetbl.c` 的地方 | `OUT:9`, `MAPS:545`, `check_header:593`, emit 块 `:655-675` |
-| `tests/xde_test.c` | 唯一测试文件（753 行） | 6 个 `expect_*` 助手, `main:161` |
+| `tests/xde_test.c` | 唯一测试文件（871 行） | 6 个 `expect_*` 助手, `main:161` |
 | `msvc/` | VS 解决方案与工程（一个工程） | `xde.sln`, `xde.vcxproj` |
 | `xde102/` | 原始 XDE 1.02 源码与设计文档，**仅参考、不构建** | `xde.txt`（242 行）, `todo`（11 行） |
 
@@ -282,7 +284,7 @@ msvc\xde.sln
 build\xde_test.exe
 ```
 
-退出码 `0` = 全通过，`1` = 有失败。`main` 是 `int main(void)`，**没有任何 CLI 参数**（无 filter / verbose / 单用例选择），每次运行都执行全部 133 项检查。
+退出码 `0` = 全通过，`1` = 有失败。`main` 是 `int main(void)`，**没有任何 CLI 参数**（无 filter / verbose / 单用例选择），每次运行都执行全部 192 项检查。
 
 ### 重新生成属性表
 
@@ -319,9 +321,9 @@ cl /nologo /W3 /O2 /TC /std:c11 /Iinclude /Isrc /c src\xde.c src\xdetbl.c src\xd
 - **错误处理**：返回长度 / `0`。无状态枚举、无 errno、无 out-param 状态。
 - **内存**：零堆分配。字面量表用 `static const uint8_t ...[]` 放在函数作用域内。
 - **边界安全**：读字节必须走 `cur_left` / `get_byte` / `peek_byte`。
-- **注释风格**：行内 `//`，多用于标注特例原因，例：`// 32-bit GP writes zero-extend in 64-bit mode.`（`:291`）、`// Vector encodings use OTHER for the reg field.`（`:295`）、`// segment override`（`:383`）。**全树没有任何 `TODO`/`FIXME`/`XXX`/`HACK`/`NOTE` 标记**（`src/` 已核）。
+- **注释风格**：行内 `//`，多用于标注特例原因，例：`// 32-bit GP writes zero-extend in 64-bit mode.`（`:289`）、`// Vector encodings use OTHER for the reg field.`（`:293`）、`// segment override`（`:381`）。**全树没有任何 `TODO`/`FIXME`/`XXX`/`HACK`/`NOTE` 标记**（`src/` 已核）。
 - **表纪律**：列宽固定，`xde_attr` 每行 8 个 `0x%08X`，每组带 `// legacy` / `// 0F` 之类行尾注释。
-- **对象集的打印策略**（`xde_sprintset`，`src/xde_text.c:51-129`）：按列从宽到窄取第一个命中——含有 `RAX` 就绝不打印 `EAX`/`AX`；16 位列之后还有 8 位扩展寄存器兜底（`SP`→`SPL`、`BP`→`BPL`、`SI`→`SIL`、`DI`→`DIL`，`:95-110`）；`XSET_UNDEF` 用**子集判定** `(set & XSET_UNDEF) == XSET_UNDEF`（`:55`）特判为 `"???"`。第二对象集字由 `xde_sprintset2` 打印（`src/xde_text.c:132-165`）：`(set2 & XSET2_ALL) == XSET2_ALL`（`:142`）特判为 `"???"`，否则先逐位输出 `R16`…`R31`（`:147-152`），再逐位输出 `R8B`…`R15B`（`:153-161`）。两处都是子集判定，`set2` 带 bit ≥ 24 的杂位也不会破坏 undef 标记。
+- **对象集的打印策略**（`xde_sprintset`，`src/xde_text.c:51-129`）：按列从宽到窄取第一个命中——含有 `RAX` 就绝不打印 `EAX`/`AX`；16 位列之后还有 8 位扩展寄存器兜底（`SP`→`SPL`、`BP`→`BPL`、`SI`→`SIL`、`DI`→`DIL`，`:92-110`）；`XSET_UNDEF` 用**子集判定** `(set & XSET_UNDEF) == XSET_UNDEF`（`:55`）特判为 `"???"`。第二对象集字由 `xde_sprintset2` 打印（`src/xde_text.c:132-165`）：`(set2 & XSET2_ALL) == XSET2_ALL`（`:142`）特判为 `"???"`，否则先逐位输出 `R16`…`R31`（`:147-152`），再逐位输出 `R8B`…`R15B`（`:153-161`）。两处都是子集判定，`set2` 带 bit ≥ 24 的杂位也不会破坏 undef 标记。
 
 ### `struct xde_instr` 字段参考
 
@@ -371,12 +373,12 @@ cl /nologo /W3 /O2 /TC /std:c11 /Iinclude /Isrc /c src\xde.c src\xdetbl.c src\xd
 | `include/xde.h:282-296` | 8 个导出函数声明 + 语义注释 |
 | `include/xde.h:214-276` | `struct xde_instr` |
 | `include/xde.h:181-211` | `XSET2_*` 词汇（第二对象集字：APX `r16-r31` + 8 位 `r8b-r15b` 宽度位） |
-| `src/xde.c:615-1025` | `xde_disasm_buf` —— 改解码行为从这里读起 |
-| `src/xde.c:1066-1115` | `xde_asm_buf` —— 字节重组 + 容量检查（`xde_asm` 是它的包装，`:1117-1120`） |
-| `src/xde.c:1038-1064` | `asm_size` —— 估算编码所需字节数，与 `xde_asm_buf` 的落地循环必须同步 |
-| `src/xde.c:750-753` / `:801-804` / `:865` | 三处编码类歧义门槛 |
+| `src/xde.c:613-1028` | `xde_disasm_buf` —— 改解码行为从这里读起 |
+| `src/xde.c:1069-1118` | `xde_asm_buf` —— 字节重组 + 容量检查（`xde_asm` 是它的包装，`:1120-1123`） |
+| `src/xde.c:1041-1067` | `asm_size` —— 估算编码所需字节数，与 `xde_asm_buf` 的落地循环必须同步 |
+| `src/xde.c:750-753` / `:799-802` / `:863` | 三处编码类歧义门槛 |
 | `src/xde.c:123-144` | `XA_*` → `C_*` 映射表（新增属性位必改） |
-| `src/xde.c:146` / `:276` / `:399` | 三趟对象集推导 |
+| `src/xde.c:146` / `:274` / `:397` | 三趟对象集推导 |
 | `src/xde_text.c:132` | `xde_sprintset2` —— 第二对象集字的打印器 |
 | `src/xde_text.c:7` | `xde_sprintfl` —— flag 打印器（新增 flag 覆盖时改这里） |
 | `src/xdetbl.h:9-45` | `XA_*` 位定义 + IMM / GRP 位移 |
@@ -402,7 +404,7 @@ cl /nologo /W3 /O2 /TC /std:c11 /Iinclude /Isrc /c src\xde.c src\xdetbl.c src\xd
 
 ### 框架与结构
 
-**自研极简 harness，无第三方框架，无 `ASSERT`/`CHECK`/`TEST` 宏**。全部逻辑在 `tests/xde_test.c`（753 行）的单个 `int main(void)`（`:161-753`）中：83 个匿名 `{ }` 块，每块一个 `static const uint8_t` 向量紧跟 `expect_*` 调用。**零文件 IO、零 fixture、零 golden 文件**。
+**自研极简 harness，无第三方框架，无 `ASSERT`/`CHECK`/`TEST` 宏**。全部逻辑在 `tests/xde_test.c`（871 行）的单个 `int main(void)`（`:161-871`）中：92 个匿名 `{ }` 块，每块一个 `static const uint8_t` 向量紧跟 `expect_*` 调用。**零文件 IO、零 fixture、零 golden 文件**。
 
 断言助手（括注是本轮实测的调用次数）：
 
@@ -414,12 +416,12 @@ cl /nologo /W3 /O2 /TC /std:c11 /Iinclude /Isrc /c src\xde.c src\xdetbl.c src\xd
 | `expect_enc(name, mode, b, n, want_len, enc)` | `:47-65` | 要求长度 + `d.enc`。**实现里硬编码传 15，忽略形参 `n`**（`:51`）（14 次） |
 | `expect_fail(name, mode, b, n)` | `:67-78` | 要求返回 `0`（4 次） |
 | `expect_roundtrip(name, mode, b, n)` | `:80-113` | disasm → `xde_asm`（长度须等于 `n`）→ **`memcmp(out, b, n)` 字节级比较**（`:101`）→ 再 disasm，比较 `len` + `opcode` + `modrm`（5 次） |
-| `expect_set(name, mode, b, n, sel, bit, want)` | `:117-138` | 要求解码长度 == `n`，再断言单个对象集位的存在/不存在。`sel` 0/1/2/3 = `src_set`/`dst_set`/`src_set2`/`dst_set2`，`want` 1 = 置位、0 = 未置位；成功打 `set<n> 0x… set|clear`（44 次） |
-| `expect_flag(name, mode, b, n, bit, want)` | `:141-159` | 要求解码长度 == `n`，再断言单个 flag 位。`bit` 取单个 `C_*` 常量，`want` 1 = 置位、0 = 未置位；成功打 `flag 0x… set|clear`（3 次） |
+| `expect_set(name, mode, b, n, sel, bit, want)` | `:117-138` | 要求解码长度 == `n`，再断言单个对象集位的存在/不存在。`sel` 0/1/2/3 = `src_set`/`dst_set`/`src_set2`/`dst_set2`，`want` 1 = 置位、0 = 未置位；成功打 `set<n> 0x… set|clear`（83 次） |
+| `expect_flag(name, mode, b, n, bit, want)` | `:141-159` | 要求解码长度 == `n`，再断言单个 flag 位。`bit` 取单个 `C_*` 常量，`want` 1 = 置位、0 = 未置位；成功打 `flag 0x… set|clear`（22 次） |
 
-### 覆盖矩阵（133 项检查 / 112 个用例名）
+### 覆盖矩阵（192 项检查）
 
-133 = 112 次助手调用（`expect_len` 42 + `expect_enc` 14 + `expect_fail` 4 + `expect_roundtrip` 5 + `expect_set` 44 + `expect_flag` 3）+ 21 项内联检查（`C_RIPREL` 1 + Object sets 打印器 4 + 闸门/asm 区段 10 + 规范前缀 2 + `sete al` 非 undef 1 + 打印器最坏情况 3）。
+192 = 170 次助手调用（`expect_len` 42 + `expect_enc` 14 + `expect_fail` 4 + `expect_roundtrip` 5 + `expect_set` 83 + `expect_flag` 22）+ 22 项内联检查（`C_RIPREL` 1 + Object sets 打印器 4 + 闸门/asm 区段 10 + 规范前缀 2 + `sete al` 非 undef 1 + 打印器最坏情况 3 + Coverage 区段 ud2 1）。
 
 | 区段注释 | 行 | 检查数 | 内容 |
 |----------|-----|--------|------|
@@ -433,9 +435,10 @@ cl /nologo /W3 /O2 /TC /std:c11 /Iinclude /Isrc /c src\xde.c src\xdetbl.c src\xd
 | `// Object sets: 8-bit extension registers vs high bytes, and APX EGPRs` | `:401-504` | 32 | 27 项 `expect_set` + 4 项内联打印器检查 + 1 项字节级往返：`mov spl,al`（`XSET_SPL` 置位且**不含** `XSET_SP`）、`mov ah,al`（`XSET_AH` 置位且**不含** `XSET_SPL`，钉住无 REX 时的差异）、`rex2 lea r16d,[rax]`（`dst_set2` 含 `XSET2_R16`、`dst_set` 不含 `XSET_OTHER`）、`rex2 lea r31d,[rax]`（`XSET2_R31`）、`rex2 push r16`（`src_set2` 含 `XSET2_R16`，钉住 opcode+r 的 B4）、`rex2 mov eax,[r16]`（SIB base 的 B4 → `src_set2` 含 R16，同时 `src_set` 含 `XSET_RAX`）、`rex2 add rax,r16`（`mod == 3` 下 reg 是 EGPR、r/m 是 legacy GPR，`:432-438`）；打印器输出串断言（`R16` / `R8B` / `SPL` / 解码后再打印 `R16`，`:439-468`）。`:470-504` 是同区段续块（注释 `// REX2 round-trip with a legacy prefix, MOV store forms, 8-bit r8-r15.`）：`66 D5 40 8D 00` 往返（钉 `p_66` 与 REX2 头共存）、`C6 C0 12`（`mov al,0x12` 报 dst 不报 src）、`8B C3`（`mov eax,ebx` 的 r/m 仍计入 src，反向控制）、`41 88 C0`（`mov r8b,al` → `XSET_R8` 与 `XSET2_R8B` 同时置位）、`41 88 C7`（`r15b` → `XSET2_R15B`）、`49 8B C0`（`mov rax,r8` → **无** `R8B`）、`44 8B C0`（`mov r8d,eax` → **无** `R8B`） |
 | `// XOP gate in 16/32-bit, the relocated C_REL flag, and xde_asm limits` | `:506-612` | 14 | 4 次助手调用 + 10 项内联检查：`8F 08` 在 32 位 → `expect_len` 长度 2、`C_BAD` 置位；`call rel32` → `C_REL` 置位且 `C_BAD` 未置位；`xde_asm` 对 `datasize=200`/`addrsize=200`/`nvex=200` 夹到数组容量后分别返回 9/9/5；`xde_asm_buf(out,4)` 对 7 字节指令返回 0、`xde_asm_buf(out,7)` 返回 7；`xde_sprintfl` 对 `push rbp` 含 `C_PUSH`、对 `ret` 含 `C_CMD_RET`、对 `mov eax,imm32` 含 `C_DATA4`、对 RIP 相对 `mov` 含 `C_ADDR4`；`xde_sprintset2(XSET2_ALL \| 1<<40)` 打印 `???` |
 | `// Canonical prefix order, and the flag intents recorded in xde102/todo.` | `:613-717` | 23 | 17 项 `expect_set` + 6 项内联检查：规范前缀顺序 2 项（`:614-634`，`67 66 90` → `66 67 90`、`64 F3 A4` → `F3 64 A4`）；REP/CMPS 标志 7 项（`:635-647`：`rep movsb` src/dst 均无 FL 且有 RCX；`rep cmpsb` src+dst 有 FL；`cmpsb` dst 有 FL、src 无 FL）；`cld`/`std` dst 有 FL 各 1 项（`:648-653`）；`SETcc` 4 项（`:654-672`：`sete al` dst 有 AL、src 有 FL、src 无 AL；`sete r8b` dst2 有 `R8B`）+ 1 项内联「`sete al` 的 `xde_sprintset(src_set)` 不是 `???`」；`SAHF`/`LAHF` 4 项（`:673-680`：`sahf` src 有 AH / dst 有 FL，`lahf` src 有 FL / dst 有 AH）；打印器最坏情况 3 项（`:681-717`：全位置位的 `allflags` → `xde_sprintfl` 227 字节、`xde_sprintset(~0ULL ^ 1<<63)` 79 字节、`xde_sprintset2(XSET2_ALL & ~XSET2_R16)` 97 字节，均断言 `< 256`） |
-| （无区段注释） | `:718-733` | 4 | `pop rax (8F /0)`、`test al,0x12`、`not al`、`call rax` |
-| `// 16-bit` | `:735` | 2 | `add ax,ax`、`mov ax,[moffs16]` |
-| `// truncated` | `:745` | 1 | 截断的 `mov rax,imm64` |
+| `// Coverage: mode-dependent sets, implicit registers, I/O and flags.` | `:718-835` | 59 | 39 项 `expect_set` + 19 项 `expect_flag` + 1 项内联 `fail`（`ud2 sets undefined`）：模式相关栈集（`push` 64 位 → `XSET_RSP`；32 位 → `XSET_ESP` 且 `XSET_RSP & ~XSET_ESP` 清）、16 位 `movsb` → SI/DI、16 位 `mov ax,[1234]` → MEM/AX/`C_ADDR2`、`PUSHA` → EAX/EDI/ESP、I/O → DEV/DX（含 `OUT` 的负向控制）、`CPUID` → src EAX、dst EAX/EBX/ECX/EDX、`MOV` 与段寄存器互传 → OTHER、`LEAVE` → RSP/RBP、移位 → CL/AL/FL（含 `shl` 不读 FL 与 `rcl` 读 FL 的正反对照）、`F7 /0` → dst FL、`F6 /2`（`NOT`）→ 无 dst FL、标志 `C_STOP`/`C_CMD_RET`/`C_CMD_JMP`/`C_CMD_JCC`/`C_CMD_CALL`/`C_I64`/`C_REL`/`C_F64`/`C_3DNOW`/`C_OPSZ8`/`C_SIB`/`C_ADDR1`/`C_DATA2`、`67` + 64 位 mod=0/rm=5 → `C_RIPREL` 清且 `C_ADDR4` 置、`0F 0B`（UD2）→ `C_UNDEF` 且 `xde_sprintset` 输出 `"???"` |
+| （无区段注释） | `:836-851` | 4 | `pop rax (8F /0)`、`test al,0x12`、`not al`、`call rax` |
+| `// 16-bit` | `:853` | 2 | `add ax,ax`、`mov ax,[moffs16]` |
+| `// truncated` | `:863` | 1 | 截断的 `mov rax,imm64` |
 
 ### 输出与退出码
 
@@ -450,11 +453,11 @@ return g_fail ? 1 : 0;
 
 ### 覆盖缺口（被要求"补测试"时的清单）
 
-1. **对象集覆盖仍然很浅**：现在有 44 项 `expect_set` 断言，但分散在少数几条编码路径上——Object sets 区段 27 项（`mov spl,al`/`mov ah,al` 两条高字节/扩展字节案例、5 个 REX2/EGPR 向量共 9 条断言，以及 `C6`/`MOV` 存储形式与 8 位 r8b-r15b 几条），本轮新增区段 17 项（`XSET_FL` 9 项 + `SETcc` 4 项 + `SAHF`/`LAHF` 4 项）。位掩码里绝大多数 `XSET_*` 仍无断言；`xde_sprintset`/`xde_sprintset2`/`xde_sprintfl` 三个打印器合计也只被 13 项内联检查触碰（Object sets 区段 4 + 闸门区段 5 + `sete al` 非 undef 1 + 打印器最坏情况 3）。对象集是本库的一半价值，断言密度仍远低于长度/编码类。
-2. **`flag` 位只有 4 条断言**：3 条 `expect_flag`（`C_BAD` 置位 / `C_REL` 置位 / `C_BAD` 未置位，`:510-515`）+ 1 条内联 `C_RIPREL`（`:194-201`，唯一还留在 `expect_*` 之外的内联 `fail`）。其余 `C_*` 无覆盖。（`XSET_FL` 是对象集位、不是 `flag` 位，本轮新增的 11 项 `XSET_FL` 断言记在 `expect_set` 名下。）
+1. **对象集覆盖仍然很浅**：现在对象集断言共 105 项（83 项 `expect_set` + 22 项 `expect_flag`），但 `expect_set` 那部分分散在少数几条编码路径上——Object sets 区段 27 项（`mov spl,al`/`mov ah,al` 两条高字节/扩展字节案例、5 个 REX2/EGPR 向量共 9 条断言，以及 `C6`/`MOV` 存储形式与 8 位 r8b-r15b 几条），Canonical 区段 17 项（`XSET_FL` 9 项 + `SETcc` 4 项 + `SAHF`/`LAHF` 4 项），本轮新增的 Coverage 区段 39 项（模式相关栈集、16 位串操作与寻址、`PUSHA`、I/O、`CPUID`、段寄存器、`LEAVE`、移位与组 3 的标志、若干 `C_*` 位、`UD2`）。位掩码里绝大多数 `XSET_*` 仍无断言；`xde_sprintset`/`xde_sprintset2`/`xde_sprintfl` 三个打印器合计也只被 13 项内联检查触碰（Object sets 区段 4 + 闸门区段 5 + `sete al` 非 undef 1 + 打印器最坏情况 3）。对象集是本库的一半价值，断言密度仍远低于长度/编码类。
+2. **`flag` 位已覆盖 22 条 `expect_flag`，但仍有整类盲区**：`expect_flag` 覆盖 `C_BAD`（置位与未置位各一）、`C_REL`、`C_D64`、`C_ADDR2`、`C_STOP`、`C_CMD_RET`/`C_CMD_JMP`/`C_CMD_JCC`/`C_CMD_CALL`、`C_F64`、`C_O64`、`C_3DNOW`、`C_OPSZ8`、`C_SIB`、`C_ADDR1`/`C_ADDR4`、`C_DATA2`、`C_UNDEF`、`C_I64` 与 `C_RIPREL`（未置位）；内联另有 `C_RIPREL`（`:194-201`）与 `C_PUSH`/`C_CMD_RET`/`C_DATA4`/`C_ADDR4` 的 `xde_sprintfl` 串断言（`:568-601`）。仍无断言的：`C_ADDR67`/`C_DATA66`/`C_DATA1`/`C_DATA8`/`C_ADDR8`/`C_MODRM`/`C_POP`/`C_VEX`/`C_EVEX`/`C_XOP`/`C_REX`/`C_REX2`——这些名字目前只出现在 `:681-717` 的全位置位样例里，不构成解码行为断言。（`C_CMD_CALL`/`C_I64` 的断言是本轮新增，位于 `:801-802`。）（`XSET_FL` 是对象集位、不是 `flag` 位，`expect_set` 名下现有 17 项 `XSET_FL` 断言。）
 3. `expect_enc` 忽略 `n` 形参（硬编码 15，`:51`）→ 该助手下从不测试截断行为。
 4. 重复用例名：`"mov rax,[rip+0]"`（`:193` 是 `expect_len` 与 `:198` 是内联 `fail`/`printf`）与 `"rex2 lea r16d,[rax]"`（`:394` 的 `expect_enc` 与 `:416` 的 `expect_set`）——按名字 grep 输出会有歧义；缓冲区也被跨用例复用（`inc[]` `:373`、`aaa[]` `:382`）。
-5. `:718-733` 四例缺区段注释，位置夹在「规范前缀 / 标志」区段与 `// 16-bit` 之间，容易误归类。
+5. `:836-851` 四例缺区段注释，位置夹在「规范前缀 / 标志」区段与 `// 16-bit` 之间，容易误归类。
 6. `XDE_ENC_LEGACY` 从未被 `expect_enc` 断言。
 
 ### 无 CLI 面
@@ -484,7 +487,7 @@ return g_fail ? 1 : 0;
 2. 若用到**新的** `XA_*` 位/常量，同步 `src/xdetbl.h:9-45`（Python 侧在 `gen_tables.py:11-55` 各镜像一份）；
 3. 重新生成：`python tools\gen_tables.py`——`check_header()`（`gen_tables.py:593-638`）会先逐名比对 `xdetbl.h` 与脚本常量，漂移就列出差异并 `SystemExit(1)` 且**不写文件**，所以同步 `src/xdetbl.h` 是硬性前置；
 4. 把 `src/xdetbl.c` 的改动一并提交（它入库）；
-5. 若新属性需要影响 `flag` 或对象集，还要改 `src/xde.c` 的 `apply_attr_flags`（`:123-144`）或三趟对象集推导（`:146` / `:276` / `:399`）；
+5. 若新属性需要影响 `flag` 或对象集，还要改 `src/xde.c` 的 `apply_attr_flags`（`:123-144`）或三趟对象集推导（`:146` / `:274` / `:397`）；
 6. 加测试用例并 `build.bat`。
 
 本轮示例：`m1[0x90..0x9F]`（SETcc）在 `gen_tables.py:329-330` 从 `XA_MODRM | XA_OPSZ8 | XA_UNDEF` 改成 `XA_MODRM | XA_OPSZ8`（去掉 `XA_UNDEF`），重跑生成器后 `src/xdetbl.c` 的行数与结构不变；FL 读取改在 `apply_usage_special`/`apply_modrm_usage` 里按 opcode 硬编码（`XA_*` 位空间已满，没有对应属性位）。
@@ -519,12 +522,14 @@ return g_fail ? 1 : 0;
 
 以下是**代码可证**的已知缺口（作者未用 TODO 标注）：
 
-- **REX2 保留 `p_66`/`p_rep`（刻意行为，不是缺口）**（对比 VEX `:817-818`/`:840-841`、EVEX `:780-781`、XOP `:885-886` 都清）——`66` 是 REX2 合法的遗留前缀，不是多余前缀。编码侧 `p_66` 与其它遗留前缀一起在 `:1092` 统一发射（无 nvex 专属分支），所以 `66 D5 …` 现在能字节级往返；改这里要解码/编码两侧一起动。
-- **`C_ADDR8` 只来自 MOFFS（原先那条不可达分支已删）**：`parse_modrm` 里 `disp` 只会是 1/2/4（`:566-574`，末行注释写明），原来永不触发的 `else → C_ADDR8` 已删除；8 字节地址只经 MOFFS 路径（`:984`）。新增位移宽度前先确认这条不变量还成立。
+- **REX2 保留 `p_66`/`p_rep`（刻意行为，不是缺口）**（对比 VEX `:815-816`/`:838-839`、EVEX `:778-779`、XOP `:883-884` 都清）——`66` 是 REX2 合法的遗留前缀，不是多余前缀。编码侧 `p_66` 与其它遗留前缀一起在 `:1095` 统一发射（无 nvex 专属分支），所以 `66 D5 …` 现在能字节级往返；改这里要解码/编码两侧一起动。
+- **`C_ADDR8` 只来自 MOFFS（原先那条不可达分支已删）**：`parse_modrm` 里 `disp` 只会是 1/2/4（`:564-573`，末行注释写明），原来永不触发的 `else → C_ADDR8` 已删除；8 字节地址只经 MOFFS 路径（`:987`）。新增位移宽度前先确认这条不变量还成立。
 - **`xde_sprintfl` 已打印解码器可能产生的每一个 flag 位**（`src/xde_text.c:7-49`，不再是缺口）：共 34 个名字——低半 12 个（`C_BAD`/`C_REL`/`C_STOP`/`C_MODRM`/`C_SIB`/`C_RIPREL`/`C_REX`/`C_VEX`/`C_EVEX`/`C_XOP`/`C_REX2`/`C_UNDEF`，`:10-21`）+ `C_OPSZ8`（`:22`）+ 10 个尺寸类（`C_ADDR67`/`C_DATA66`/`C_ADDR1/2/4/8`/`C_DATA1/2/4/8`，`:23-32`）+ 7 个（`C_PUSH`/`C_POP`/`C_I64`/`C_O64`/`C_F64`/`C_D64`/`C_3DNOW`，`:33-39`）+ `C_CMD_*` 4 个（用 `XDE_CMD(fl)` 的 switch，`:40-46`）。解码路径不再置位的操作数角色位 `C_SRC_*`/`C_DST_*`（2.00 的 `src/xde.c` 一处都不写）仍不打印。缓冲区契约可验证：`tests/xde_test.c:681-717` 用全位置位的 `allflags` 钉住最坏情况 `xde_sprintfl` **227 字节**（断言 `< 256`），`xde_sprintset(~0ULL ^ 1<<63)` 79 字节、`xde_sprintset2(XSET2_ALL & ~XSET2_R16)` 97 字节，所以头文件那句「output should be at least 256 bytes」本轮首次被测到。
-- **undef 标记是子集判定**：`(set & XSET_UNDEF) == XSET_UNDEF`（`src/xde_text.c:55`）与 `(set2 & XSET2_ALL) == XSET2_ALL`（`:142`）。后者严格更稳健——`set2` 带 bit ≥ 24 的杂位时仍打 `"???"`（`tests/xde_test.c:606` 用 `XSET2_ALL | 0x10000000000ULL` 钉住），不再依赖解码侧的整体赋值。
-- **编码侧已按 SDM 组序规范化前缀**：`xde_asm_buf` 现在按 SDM 组序发射遗留前缀——lock/rep（组1）→ segment（组2）→ `66`（组3）→ `67`（组4）（`:1089-1093`），随后才是 REX 或 `vex[]` + opcode；`asm_size()`（`:1038-1064`）的计数顺序同步调整（字节总数不变）。解码侧仍不限制前缀顺序，所以非规范序输入（如 `67 66 90`、`64 F3 A4`）能解码，但**重编码会规范化**为 `66 67 90`、`F3 64 A4`——`xde_asm` 的输出不再逐字节等于非规范输入，往返测试因此只用规范序输入，或显式断言规范化结果。
-- **`xde102/todo` 的 4 条现已全部处理**（1.02 时代的留档，不再有未决项）：① `REP` 对不同串指令的标志差异 → 已修：`REP` 只把 `CX/ECX/RCX` 计入 src+dst，不再无条件置 FL；`CMPS`/`SCAS` 写 FL、带 `REP` 时再读 FL（`src/xde.c:157-161`、`:246-255`）；② `setxx` → 已修：`0F 90-9F` 读 FL 且 r/m 只写不读（`:268-270`、`:288-289`）；③ `cld/std/cmpsb` 的 DF 源集 → 按「DF 不作为源」处理（`CLD`/`STD` 只置 `dst_set |= XSET_FL`）；④ `PUSH` 的栈宽不受 `67` 影响 → 2.00 早已由 `XA_PUSH` → `stack_set(mode)` 处理（`:478-486`）。被要求处理这些行为前先确认是否仍适用。
+- **undef 标记是子集判定**：`(set & XSET_UNDEF) == XSET_UNDEF`（`src/xde_text.c:55`）与 `(set2 & XSET2_ALL) == XSET2_ALL`（`:142`）。后者严格更稳健——`set2` 带 bit ≥ 24 的杂位时仍打 `"???"`（`tests/xde_test.c:605` 用 `XSET2_ALL | 0x10000000000ULL` 钉住），不再依赖解码侧的整体赋值。
+- **带 `XA_UNDEF` 的指令对象集恒为全 1，哪怕唯一可确定的影响只是「读 FL」**：`Jcc`（`70-7F` / `0F 80-8F`）、`JMP`/`CALL`/`RET`、loop、x87、`WAIT` 等在表里带 `XA_UNDEF`（如 `tools/gen_tables.py:327` 的 `m1[0x80..0x8F]`），于是 `:997-1001` 把 `src_set`/`dst_set` 整体赋值成 `XSET_UNDEF`——`jz rel8` 唯一可确定的影响只是「读 FL」，`src_set` 却返回全 1。`flag` 不受影响（`C_CMD_JCC`/`C_REL`/`C_F64` 照常置位，见 `tests/xde_test.c:799-804`）。这可能是刻意的保守选择（`XA_UNDEF` 读作「寄存器副作用未知」），要细化得先定档它的语义。
+- **`C_I64` 只在 16/32 位出现，`C_O64` 只在 64 位出现**：`apply_attr_flags`（`src/xde.c:134`）照 `XA_I64` 置 `C_I64`，但带 `XA_I64` 的指令在 `mode == 64` 时更早被拒（`src/xde.c:906-907`）；16/32 位下它们合法，所以 `inc eax`（`40`，`gen_tables.py:124`）与 `aaa`（`37`，`:119`）在 32 位解码后会带上 `C_I64`（`aaa` 还带 `C_BAD`）。`C_O64` 相反，只在 64 位成功解码上出现（`syscall`，`m1[0x05]`）。两个名字 `xde_sprintfl` 都打印（`src/xde_text.c:35-36`），且现在都有解码断言（`C_I64` → 32 位 `inc eax`，`C_O64` → `syscall`，`tests/xde_test.c:801-805`）——这条记录的是「位只在单一模式下可达」这一事实，不是覆盖缺口。
+- **编码侧已按 SDM 组序规范化前缀**：`xde_asm_buf` 现在按 SDM 组序发射遗留前缀——lock/rep（组1）→ segment（组2）→ `66`（组3）→ `67`（组4）（`:1092-1096`），随后才是 REX 或 `vex[]` + opcode；`asm_size()`（`:1041-1067`）的计数顺序同步调整（字节总数不变）。解码侧仍不限制前缀顺序，所以非规范序输入（如 `67 66 90`、`64 F3 A4`）能解码，但**重编码会规范化**为 `66 67 90`、`F3 64 A4`——`xde_asm` 的输出不再逐字节等于非规范输入，往返测试因此只用规范序输入，或显式断言规范化结果。
+- **`xde102/todo` 的 4 条现已全部处理**（1.02 时代的留档，不再有未决项）：① `REP` 对不同串指令的标志差异 → 已修：`REP` 只把 `CX/ECX/RCX` 计入 src+dst，不再无条件置 FL；`CMPS`/`SCAS` 写 FL、带 `REP` 时再读 FL（`src/xde.c:155-160`、`:244-253`）；② `setxx` → 已修：`0F 90-9F` 读 FL 且 r/m 只写不读（`:266-268`、`:287`）；③ `cld/std/cmpsb` 的 DF 源集 → 按「DF 不作为源」处理（`CLD`/`STD` 只置 `dst_set |= XSET_FL`）；④ `PUSH` 的栈宽不受 `67` 影响 → 2.00 早已由 `XA_PUSH` → `stack_set(mode)` 处理（`:476-484`）。被要求处理这些行为前先确认是否仍适用。
 - **`xde102/` 与 `src/` 存在同名文件**（`xde.c`/`xde.h`/`xdetbl.c`/`xde_text.c`）。搜索或批量替换务必限定路径，否则会误改参考资料。`xde102/xde.c:5` 用 `#include "xdetbl.c"` 文本包含其数据表，**无法与 2.00 同编译**（并重复定义 `xde_disasm`/`xde_asm`/`xde_sprintfl`/`xde_sprintset`）。仓库中没有任何构建文件或脚本引用 `xde102/`。
 - **`src/xdetbl.h` 的 `XA_*`/`XG_*` 已有自动校验**（`check_header()`，`tools/gen_tables.py:593-638`，调用 `:677`）：`gen_tables.py` 顶部仍镜像一份常量，但生成前会解析 `xdetbl.h`，逐名比对 `XA_*`（含 `XA_IMM_*`、`XA_GRP_MASK`、两个 shift）、`enum xde_group_id` 的逐个枚举值（按位置，含 `XG_NONE`）与 `#define XDE_MAP_COUNT`（对 `len(MAPS)`），不一致就列出差异并 `SystemExit(1)`，**在写文件之前**退出，所以两边不会再静默漂移。改常量仍要动两处，只是现在忘一边会被拒绝而不是产出错误解释。
 
@@ -532,8 +537,8 @@ return g_fail ? 1 : 0;
 
 | 文档 | 内容 |
 |------|------|
-| `README.md`（103 行） | 唯一面向使用者的文档：`## What it does`（`:11`）、`## Layout`（`:23`）、`## Build (MSVC)`（`:36`，含生成器一致性校验那一句）、`## API`（`:57`，示例 `:60-67`，含 `xde_asm_buf`）、`## Notes`（`:85`，编码规则）。**无许可证段落、无外部链接。** |
+| `README.md`（104 行） | 唯一面向使用者的文档：`## What it does`（`:11`）、`## Layout`（`:23`）、`## Build (MSVC)`（`:36`，含生成器一致性校验那一句）、`## API`（`:57`，示例 `:60-67`，含 `xde_asm_buf`）、`## Notes`（`:85`，编码规则）。**无许可证段落、无外部链接。** |
 | `AGENTS.md`（本文件） | 面向 AI 助手 / 新维护者的完整工程参考 |
-| `xde102/xde.txt`（242 行） | 1.02 设计文档：版本历史（`:7-9`）、对象集设计原则与「不区分内存地址」的理由（`:16-40`）、被否决的 "Permutation conditions" 方案（`:42-44`）、API 与结构体清单（`:46-140`）、REP INSB 示例及作者承认的 bug（`:111-117`）、结尾是 Mistfall 项目的 `AnalyzeRegs` 用法示例（`:142-242`）。是理解 2.00 设计取舍的最佳背景读物。 |
+| `xde102/xde.txt`（242 行） | 1.02 设计文档：版本历史（`:8-9`）、对象集设计原则与「不区分内存地址」的理由（`:16-40`）、被否决的 "Permutation conditions" 方案（`:42-44`）、API 与结构体清单（`:46-140`）、REP INSB 示例及作者承认的 bug（`:111-117`）、结尾是 Mistfall 项目的 `AnalyzeRegs` 用法示例（`:142-242`）。是理解 2.00 设计取舍的最佳背景读物。 |
 | `xde102/todo`（11 行） | 1.02 时代的遗留问题清单，见 Known Gaps 中「`xde102/todo` 的 4 条现已全部处理」 |
 | `LICENSE`（21 行） | MIT |
