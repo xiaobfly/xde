@@ -152,12 +152,19 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
     uint64_t xset;
     uint8_t c = (uint8_t)opcode;
 
-    // REP/REPE/REPNE: CX/ECX/RCX is src and dst. The prefix alone says nothing
-    // about flags; only CMPS/SCAS touch them (see below).
+    // REP/REPE/REPNE: CX/ECX/RCX is src and dst, but only on the string ops.
+    // On everything else F2/F3 is an opcode selector rather than a repeat
+    // (SSE scalars, PAUSE, ENDBR, CRC32), so it names no count register.
     if (diza->p_rep) {
-        xset = (mode == 64) ? XSET_RCX : (addr == 2 ? XSET_CX : XSET_ECX);
-        diza->src_set |= xset;
-        diza->dst_set |= xset;
+        int str = (c == 0xA4 || c == 0xA5 || c == 0xA6 || c == 0xA7 ||
+                   c == 0xAA || c == 0xAB || c == 0xAC || c == 0xAD ||
+                   c == 0xAE || c == 0xAF || c == 0x6C || c == 0x6D ||
+                   c == 0x6E || c == 0x6F);
+        if (str) {
+            xset = (mode == 64) ? XSET_RCX : (addr == 2 ? XSET_CX : XSET_ECX);
+            diza->src_set |= xset;
+            diza->dst_set |= xset;
+        }
     }
 
     if (diza->map == XDE_MAP_LEGACY) {
@@ -298,6 +305,28 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                     ((unsigned)diza->rex_r << 3) | reg;
     // SETcc (0F 90-9F) only writes its r/m8 and tests the flags.
     int setcc = (diza->map == XDE_MAP_0F && c == 0x0F && c2 >= 0x90 && c2 <= 0x9F);
+    // 0F 38 F0/F1: MOVBE (reg is the destination on the load form, the source
+    // on the store form) and CRC32, which marks reg-as-destination with the
+    // F2/F3 prefix it needs anyway. opcode2 holds the 38 escape byte for this
+    // map, so the real opcode is opcode3.
+    int reg_dst = (diza->map == XDE_MAP_0F38 &&
+                   (diza->opcode3 == 0xF0 ||
+                    (diza->opcode3 == 0xF1 && diza->p_rep != 0)));
+    int reg_src = (diza->map == XDE_MAP_0F38 && diza->opcode3 == 0xF1 &&
+                   diza->p_rep == 0);
+    // Legacy SSE/MMX share the 0F map with the GPR opcodes; anything outside
+    // this GPR set has SIMD operands, which collapse to XSET_OTHER the same
+    // way the vector encodings do. For this map opcode2 holds the 0F opcode.
+    int simd_0f = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                   !((c2 >= 0x20 && c2 <= 0x23) || c2 == 0xA3 ||
+                     c2 == 0xA4 || c2 == 0xA5 || c2 == 0xAB ||
+                     c2 == 0xAC || c2 == 0xAD || c2 == 0xAF || c2 == 0xB0 ||
+                     c2 == 0xB1 || c2 == 0xB2 || c2 == 0xB3 || c2 == 0xB4 ||
+                     c2 == 0xB5 || c2 == 0xB6 || c2 == 0xB7 || c2 == 0xB8 ||
+                     c2 == 0xBA || c2 == 0xBB || c2 == 0xBC || c2 == 0xBD ||
+                     c2 == 0xBE || c2 == 0xBF || c2 == 0xC0 || c2 == 0xC1 ||
+                     c2 == 0xC3 || (c2 >= 0x40 && c2 <= 0x4F) ||
+                     (c2 >= 0x90 && c2 <= 0x9F)));
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -322,12 +351,15 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
 
     // XA_VVVV_GPR marks a VEX/EVEX/XOP instruction whose reg field is a
     // destination register, which the 0F-map list below cannot see.
-    if (c == 0x8B || c == 0x8A || c == 0x8D || (attr & XA_VVVV_GPR) ||
+    if (c == 0x8B || c == 0x8A || c == 0x8D || (attr & XA_VVVV_GPR) || reg_dst ||
+        simd_0f ||
         (c == 0x0F && (c2 == 0xB6 || c2 == 0xB7 || c2 == 0xBE || c2 == 0xBF ||
                        (c2 >= 0x40 && c2 <= 0x4F) || c2 == 0xAF || c2 == 0xBC || c2 == 0xBD ||
                        c2 == 0xB8))) {
-        if (diza->enc == XDE_ENC_LEGACY || diza->enc == XDE_ENC_REX2 ||
-            (attr & XA_VVVV_GPR)) {
+        if (simd_0f) {
+            diza->dst_set |= XSET_OTHER;
+        } else if (diza->enc == XDE_ENC_LEGACY || diza->enc == XDE_ENC_REX2 ||
+                   (attr & XA_VVVV_GPR)) {
             uint64_t g2 = 0;
             diza->dst_set |= gp_set(dsz, regx, rex, &g2);
             diza->dst_set2 |= g2;
@@ -335,7 +367,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             diza->dst_set |= XSET_OTHER;
         }
     }
-    if (c == 0x89 || c == 0x88) {
+    if (c == 0x89 || c == 0x88 || reg_src) {
         uint64_t g2 = 0;
         diza->src_set |= gp_set(sz, regx, rex, &g2);
         diza->src_set2 |= g2;
@@ -363,8 +395,9 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         uint64_t rset = gp_set(sz, rmreg, rex, &rset2);
         if (diza->mode == 64 && sz == 4)
             rset = gp_set(8, rmreg, rex, &rset2);
-        if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2 &&
-            !(attr & XA_VVVV_GPR)) {
+        if (simd_0f ||
+            (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2 &&
+             !(attr & XA_VVVV_GPR))) {
             rset = XSET_OTHER;
             rset2 = 0;
         }
@@ -397,7 +430,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             diza->src_set |= XSET_OTHER; // segment override
             diza->src_set |= XSET_MEM;
         }
-        if (setcc ||
+        if (setcc || reg_src ||
             (diza->map == XDE_MAP_LEGACY &&
              ((c <= 0x33 && (c & 7) <= 1) || c == 0x86 || c == 0x87 ||
               c == 0x88 || c == 0x89 || (c >= 0xC0 && c <= 0xC1) ||

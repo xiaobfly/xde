@@ -1044,6 +1044,61 @@ int main(void)
         expect_set("inc eax (32) dst FL", 32, inc32b, 1, 1, XSET_FL, 1);
     }
 
+    // MOVBE / CRC32 share 0F 38 F0/F1; plus the vector object sets.
+    {
+        static const uint8_t movbe_load[] = { 0x0F, 0x38, 0xF0, 0x00 };
+        static const uint8_t movbe_store[] = { 0x0F, 0x38, 0xF1, 0x02 };
+        static const uint8_t crc32b[] = { 0xF2, 0x0F, 0x38, 0xF0, 0xC1 };
+        static const uint8_t vfrcz[] = { 0x8F, 0xE9, 0x78, 0x81, 0xC1 };
+        static const uint8_t vpcom[] = { 0x8F, 0xE8, 0x78, 0xCC, 0xC1, 0x00 };
+        static const uint8_t evmem[] = { 0x62, 0xF1, 0x7C, 0x48, 0x58, 0x05, 0, 0, 0, 0 };
+
+        expect_set("movbe eax,[rax] dst EAX", 64, movbe_load, 4, 1, XSET_EAX, 1);
+        expect_set("movbe eax,[rax] src M", 64, movbe_load, 4, 0, XSET_MEM, 1);
+        expect_set("movbe [rdx],eax src EAX", 64, movbe_store, 4, 0, XSET_EAX, 1);
+        expect_set("movbe [rdx],eax dst M", 64, movbe_store, 4, 1, XSET_MEM, 1);
+        expect_set("crc32 eax,cl src ECX", 64, crc32b, 5, 0, XSET_ECX, 1);
+        expect_set("crc32 eax,cl dst EAX", 64, crc32b, 5, 1, XSET_EAX, 1);
+        expect_set("vfrczpd src other", 64, vfrcz, 5, 0, XSET_OTHER, 1);
+        expect_set("vfrczpd dst other", 64, vfrcz, 5, 1, XSET_OTHER, 1);
+        expect_set("vpcomb src other", 64, vpcom, 6, 0, XSET_OTHER, 1);
+        expect_set("vpcomb dst other", 64, vpcom, 6, 1, XSET_OTHER, 1);
+        expect_set("evex vaddps src M", 64, evmem, 10, 0, XSET_MEM, 1);
+        expect_set("evex vaddps src other", 64, evmem, 10, 0, XSET_OTHER, 1);
+        expect_set("evex vaddps dst other", 64, evmem, 10, 1, XSET_OTHER, 1);
+        {
+            static const uint8_t endbr[] = { 0xF3, 0x0F, 0x1E, 0xFA };
+            static const uint8_t movss[] = { 0xF3, 0x0F, 0x10, 0xC1 };
+            // F2/F3 is not a REP outside the string ops: no count register.
+            expect_set("endbr64 (no src RCX)", 64, endbr, 4, 0, XSET_RCX, 0);
+            expect_set("endbr64 (no dst RCX)", 64, endbr, 4, 1, XSET_RCX, 0);
+            expect_set("movss (no src RCX)", 64, movss, 4, 0, XSET_RCX, 0);
+            expect_set("movss src other", 64, movss, 4, 0, XSET_OTHER, 1);
+        }
+        {
+            static const uint8_t movups_r[] = { 0x0F, 0x10, 0xC1 };
+            static const uint8_t paddb[] = { 0x0F, 0xFC, 0xC1 };
+            static const uint8_t movups_m[] = { 0x0F, 0x10, 0x00 };
+            static const uint8_t popcnt[] = { 0xF3, 0x0F, 0xB8, 0xC1 };
+            static const uint8_t bt[] = { 0x0F, 0xA3, 0xC1 };
+            static const uint8_t cmpxchg[] = { 0x0F, 0xB1, 0xC1 };
+            static const uint8_t now3d[] = { 0x0F, 0x0F, 0xC1, 0xBF };
+            // Legacy SSE/MMX operands collapse to OTHER, never to a GPR.
+            expect_set("movups (no src RCX)", 64, movups_r, 3, 0, XSET_RCX, 0);
+            expect_set("movups src other", 64, movups_r, 3, 0, XSET_OTHER, 1);
+            expect_set("movups dst other", 64, movups_r, 3, 1, XSET_OTHER, 1);
+            expect_set("paddb src other", 64, paddb, 3, 0, XSET_OTHER, 1);
+            expect_set("movups m dst other", 64, movups_m, 3, 1, XSET_OTHER, 1);
+            expect_set("movups m src M", 64, movups_m, 3, 0, XSET_MEM, 1);
+            // ... while the GPR opcodes in the same 0F map stay GPR.
+            expect_set("popcnt dst EAX", 64, popcnt, 4, 1, XSET_EAX, 1);
+            expect_set("popcnt src ECX", 64, popcnt, 4, 0, XSET_ECX, 1);
+            expect_set("bt src ECX", 64, bt, 3, 0, XSET_ECX, 1);
+            expect_set("cmpxchg src ECX", 64, cmpxchg, 3, 0, XSET_ECX, 1);
+            expect_set("pavgusb src other", 64, now3d, 4, 0, XSET_OTHER, 1);
+        }
+    }
+
     // 16-bit
     {
         static const uint8_t add16[] = { 0x01, 0xC0 };
