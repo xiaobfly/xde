@@ -1323,6 +1323,145 @@ int main(void)
         }
     }
 
+    // SSE mandatory prefixes: the prefix byte is part of the opcode, so the
+    // same escaped opcode under any other prefix names no instruction.
+    {
+        static const uint8_t punpcklqdq[]    = { 0x66, 0x0F, 0x6C, 0xC0 };
+        static const uint8_t punpcklqdq_no[] = { 0x0F, 0x6C, 0xC0 };
+        static const uint8_t punpcklqdq_f2[] = { 0xF2, 0x0F, 0x6C, 0xC0 };
+        static const uint8_t punpcklqdq_f3[] = { 0xF3, 0x0F, 0x6C, 0xC0 };
+        static const uint8_t punpckhqdq_no[] = { 0x0F, 0x6D, 0xC0 };
+        static const uint8_t punpckhqdq_f2[] = { 0xF2, 0x0F, 0x6D, 0xC0 };
+        static const uint8_t popcnt[]        = { 0xF3, 0x0F, 0xB8, 0xC0 };
+        static const uint8_t popcnt_no[]     = { 0x0F, 0xB8, 0xC0 };
+        static const uint8_t popcnt_66[]     = { 0x66, 0x0F, 0xB8, 0xC0 };
+        static const uint8_t popcnt_f2[]     = { 0xF2, 0x0F, 0xB8, 0xC0 };
+        static const uint8_t lddqu[]         = { 0xF2, 0x0F, 0xF0, 0x00 };
+        static const uint8_t lddqu_no[]      = { 0x0F, 0xF0, 0x00 };
+        static const uint8_t lddqu_f3[]      = { 0xF3, 0x0F, 0xF0, 0x00 };
+        static const uint8_t haddpd[]        = { 0x66, 0x0F, 0x7C, 0xC0 };
+        static const uint8_t haddps[]        = { 0xF2, 0x0F, 0x7C, 0xC0 };
+        static const uint8_t hadd_no[]       = { 0x0F, 0x7C, 0xC0 };
+        static const uint8_t hadd_f3[]       = { 0xF3, 0x0F, 0x7C, 0xC0 };
+        static const uint8_t hsub_no[]       = { 0x0F, 0x7D, 0xC0 };
+        static const uint8_t addsubpd[]      = { 0x66, 0x0F, 0xD0, 0xC0 };
+        static const uint8_t addsubps[]      = { 0xF2, 0x0F, 0xD0, 0xC0 };
+        static const uint8_t addsub_no[]     = { 0x0F, 0xD0, 0xC0 };
+        static const uint8_t addsub_f3[]     = { 0xF3, 0x0F, 0xD0, 0xC0 };
+        static const uint8_t movq_d6[]       = { 0x66, 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movdq2q[]       = { 0xF2, 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq2dq[]       = { 0xF3, 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq_d6_no[]    = { 0x0F, 0xD6, 0xC0 };
+        static const uint8_t cvttpd2dq[]     = { 0x66, 0x0F, 0xE6, 0xC0 };
+        static const uint8_t cvtpd2dq[]      = { 0xF2, 0x0F, 0xE6, 0xC0 };
+        static const uint8_t cvtdq2pd[]      = { 0xF3, 0x0F, 0xE6, 0xC0 };
+        static const uint8_t cvt_e6_no[]     = { 0x0F, 0xE6, 0xC0 };
+        static const uint8_t wbinvd[]        = { 0x0F, 0x09 };
+        static const uint8_t wbnoinvd[]      = { 0xF3, 0x0F, 0x09 };
+        static const uint8_t wbinvd_66[]     = { 0x66, 0x0F, 0x09 };
+        static const uint8_t wbinvd_f2[]     = { 0xF2, 0x0F, 0x09 };
+        static const uint8_t rsqrtps[]       = { 0x0F, 0x52, 0xC0 };
+        static const uint8_t rsqrtss[]       = { 0xF3, 0x0F, 0x52, 0xC0 };
+        static const uint8_t rsqrt_66[]      = { 0x66, 0x0F, 0x52, 0xC0 };
+        static const uint8_t rsqrt_f2[]      = { 0xF2, 0x0F, 0x52, 0xC0 };
+        static const uint8_t cvtdq2ps[]      = { 0x0F, 0x5B, 0xC0 };
+        static const uint8_t cvtps2dq[]      = { 0x66, 0x0F, 0x5B, 0xC0 };
+        static const uint8_t cvttps2dq[]     = { 0xF3, 0x0F, 0x5B, 0xC0 };
+        static const uint8_t cvt_5b_f2[]     = { 0xF2, 0x0F, 0x5B, 0xC0 };
+        static const uint8_t vmread[]        = { 0x0F, 0x78, 0xC0 };
+        static const uint8_t extrq[]         = { 0x66, 0x0F, 0x78, 0xC0 };
+        static const uint8_t insertq[]       = { 0xF2, 0x0F, 0x78, 0xC0 };
+        static const uint8_t vmread_f3[]     = { 0xF3, 0x0F, 0x78, 0xC0 };
+        static const uint8_t movq_mm[]       = { 0x0F, 0x6F, 0xC0 };
+        static const uint8_t movdqa[]        = { 0x66, 0x0F, 0x6F, 0xC0 };
+        static const uint8_t movdqu[]        = { 0xF3, 0x0F, 0x6F, 0xC0 };
+        static const uint8_t movq_mm_f2[]    = { 0xF2, 0x0F, 0x6F, 0xC0 };
+        static const uint8_t movd_mm[]       = { 0x0F, 0x7E, 0xC0 };
+        static const uint8_t movq_xmm[]      = { 0xF3, 0x0F, 0x7E, 0xC0 };
+        static const uint8_t movq_st[]       = { 0x0F, 0x7F, 0xC0 };
+        static const uint8_t movdqu_st[]     = { 0xF3, 0x0F, 0x7F, 0xC0 };
+        static const uint8_t addps[]         = { 0x0F, 0x58, 0xC1 };
+        static const uint8_t addpd[]         = { 0x66, 0x0F, 0x58, 0xC1 };
+        static const uint8_t addss[]         = { 0xF3, 0x0F, 0x58, 0xC1 };
+        static const uint8_t addsd[]         = { 0xF2, 0x0F, 0x58, 0xC1 };
+        static const uint8_t psrlw_f2[]      = { 0xF2, 0x0F, 0x71, 0xD0, 0x12 };
+        static const uint8_t psrlw_f3[]      = { 0xF3, 0x0F, 0x71, 0xD0, 0x12 };
+        static const uint8_t psrlw[]         = { 0x0F, 0x71, 0xD0, 0x12 };
+        static const uint8_t undef_7a[]      = { 0x0F, 0x7A, 0xC0 };
+        static const uint8_t undef_7a_66[]   = { 0x66, 0x0F, 0x7A, 0xC0 };
+        static const uint8_t undef_7b[]      = { 0x0F, 0x7B, 0xC0 };
+        static const uint8_t vaddps[]        = { 0xC5, 0xF8, 0x58, 0xC1 };
+        static const uint8_t andn[]          = { 0xC4, 0xE2, 0x78, 0xF2, 0xC1 };
+        static const uint8_t vaddps_evex[]   = { 0x62, 0xF1, 0x7C, 0x48, 0x58, 0xC1 };
+        expect_flag("punpcklqdq ok", 64, punpcklqdq, 4, C_BAD, 0);
+        expect_flag("punpcklqdq no 66 bad", 64, punpcklqdq_no, 3, C_BAD, 1);
+        expect_flag("punpcklqdq F2 bad", 64, punpcklqdq_f2, 4, C_BAD, 1);
+        expect_flag("punpcklqdq F3 bad", 64, punpcklqdq_f3, 4, C_BAD, 1);
+        expect_flag("punpckhqdq no 66 bad", 64, punpckhqdq_no, 3, C_BAD, 1);
+        expect_flag("punpckhqdq F2 bad", 64, punpckhqdq_f2, 4, C_BAD, 1);
+        expect_flag("popcnt ok", 64, popcnt, 4, C_BAD, 0);
+        expect_flag("popcnt no F3 bad", 64, popcnt_no, 3, C_BAD, 1);
+        expect_flag("popcnt 66 bad", 64, popcnt_66, 4, C_BAD, 1);
+        expect_flag("popcnt F2 bad", 64, popcnt_f2, 4, C_BAD, 1);
+        expect_flag("lddqu ok", 64, lddqu, 4, C_BAD, 0);
+        expect_flag("lddqu no F2 bad", 64, lddqu_no, 3, C_BAD, 1);
+        expect_flag("lddqu F3 bad", 64, lddqu_f3, 4, C_BAD, 1);
+        expect_flag("haddpd ok", 64, haddpd, 4, C_BAD, 0);
+        expect_flag("haddps ok", 64, haddps, 4, C_BAD, 0);
+        expect_flag("hadd no prefix bad", 64, hadd_no, 3, C_BAD, 1);
+        expect_flag("hadd F3 bad", 64, hadd_f3, 4, C_BAD, 1);
+        expect_flag("hsub no prefix bad", 64, hsub_no, 3, C_BAD, 1);
+        expect_flag("addsubpd ok", 64, addsubpd, 4, C_BAD, 0);
+        expect_flag("addsubps ok", 64, addsubps, 4, C_BAD, 0);
+        expect_flag("addsub no prefix bad", 64, addsub_no, 3, C_BAD, 1);
+        expect_flag("addsub F3 bad", 64, addsub_f3, 4, C_BAD, 1);
+        expect_flag("66 0F D6 ok", 64, movq_d6, 4, C_BAD, 0);
+        expect_flag("F2 0F D6 ok", 64, movdq2q, 4, C_BAD, 0);
+        expect_flag("F3 0F D6 ok", 64, movq2dq, 4, C_BAD, 0);
+        expect_flag("0F D6 without prefix bad", 64, movq_d6_no, 3, C_BAD, 1);
+        expect_flag("66 0F E6 ok", 64, cvttpd2dq, 4, C_BAD, 0);
+        expect_flag("F2 0F E6 ok", 64, cvtpd2dq, 4, C_BAD, 0);
+        expect_flag("F3 0F E6 ok", 64, cvtdq2pd, 4, C_BAD, 0);
+        expect_flag("0F E6 without prefix bad", 64, cvt_e6_no, 3, C_BAD, 1);
+        expect_flag("wbinvd ok", 64, wbinvd, 2, C_BAD, 0);
+        expect_flag("wbnoinvd ok", 64, wbnoinvd, 3, C_BAD, 0);
+        expect_flag("wbinvd 66 bad", 64, wbinvd_66, 3, C_BAD, 1);
+        expect_flag("wbinvd F2 bad", 64, wbinvd_f2, 3, C_BAD, 1);
+        expect_flag("rsqrtps ok", 64, rsqrtps, 3, C_BAD, 0);
+        expect_flag("rsqrtss ok", 64, rsqrtss, 4, C_BAD, 0);
+        expect_flag("rsqrtps 66 bad", 64, rsqrt_66, 4, C_BAD, 1);
+        expect_flag("rsqrtps F2 bad", 64, rsqrt_f2, 4, C_BAD, 1);
+        expect_flag("cvtdq2ps ok", 64, cvtdq2ps, 3, C_BAD, 0);
+        expect_flag("cvtps2dq ok", 64, cvtps2dq, 4, C_BAD, 0);
+        expect_flag("cvttps2dq ok", 64, cvttps2dq, 4, C_BAD, 0);
+        expect_flag("0F 5B F2 bad", 64, cvt_5b_f2, 4, C_BAD, 1);
+        expect_flag("vmread ok", 64, vmread, 3, C_BAD, 0);
+        expect_flag("extrq ok", 64, extrq, 4, C_BAD, 0);
+        expect_flag("insertq ok", 64, insertq, 4, C_BAD, 0);
+        expect_flag("0F 78 F3 bad", 64, vmread_f3, 4, C_BAD, 1);
+        expect_flag("movq mm ok", 64, movq_mm, 3, C_BAD, 0);
+        expect_flag("movdqa ok", 64, movdqa, 4, C_BAD, 0);
+        expect_flag("movdqu ok", 64, movdqu, 4, C_BAD, 0);
+        expect_flag("movq mm F2 bad", 64, movq_mm_f2, 4, C_BAD, 1);
+        expect_flag("movd mm ok", 64, movd_mm, 3, C_BAD, 0);
+        expect_flag("movq xmm ok", 64, movq_xmm, 4, C_BAD, 0);
+        expect_flag("movq mm store ok", 64, movq_st, 3, C_BAD, 0);
+        expect_flag("movdqu store ok", 64, movdqu_st, 4, C_BAD, 0);
+        expect_flag("addps ok", 64, addps, 3, C_BAD, 0);
+        expect_flag("addpd ok", 64, addpd, 4, C_BAD, 0);
+        expect_flag("addss ok", 64, addss, 4, C_BAD, 0);
+        expect_flag("addsd ok", 64, addsd, 4, C_BAD, 0);
+        expect_flag("F2 0F 71 bad", 64, psrlw_f2, 5, C_BAD, 1);
+        expect_flag("F3 0F 71 bad", 64, psrlw_f3, 5, C_BAD, 1);
+        expect_flag("0F 71 ok", 64, psrlw, 4, C_BAD, 0);
+        expect_flag("0F 7A bad", 64, undef_7a, 3, C_BAD, 1);
+        expect_flag("66 0F 7A bad", 64, undef_7a_66, 4, C_BAD, 1);
+        expect_flag("0F 7B bad", 64, undef_7b, 3, C_BAD, 1);
+        expect_flag("VEX vaddps untouched", 64, vaddps, 4, C_BAD, 0);
+        expect_flag("VEX andn untouched", 64, andn, 5, C_BAD, 0);
+        expect_flag("EVEX vaddps untouched", 64, vaddps_evex, 6, C_BAD, 0);
+    }
+
     // System groups: CR/DR moves, RDRAND/RDSEED, fences, FS/GS base, save/restore, prefetch.
     {
         // 0F 20-23: the reg field names the CR/DR operand, r/m names the GPR.
@@ -1815,9 +1954,7 @@ int main(void)
         static const uint8_t maskmovdqu_r[] = { 0x66, 0x0F, 0xF7, 0xC0 };
         static const uint8_t movdq2q_m[]    = { 0xF2, 0x0F, 0xD6, 0x00 };
         static const uint8_t movdq2q_r[]    = { 0xF2, 0x0F, 0xD6, 0xC0 };
-        static const uint8_t movq_r[]       = { 0x0F, 0xD6, 0xC0 };
         static const uint8_t movq66_r[]     = { 0x66, 0x0F, 0xD6, 0xC0 };
-        static const uint8_t movq_m[]       = { 0x0F, 0xD6, 0x00 };
         static const uint8_t movq66_m[]     = { 0x66, 0x0F, 0xD6, 0x00 };
         expect_flag("0F D7 m bad (64)", 64, pmovmskb_m, 3, C_BAD, 1);
         expect_flag("0F D7 m bad (32)", 32, pmovmskb_m, 3, C_BAD, 1);
@@ -1833,10 +1970,15 @@ int main(void)
         expect_flag("maskmovq not bad (64)", 64, maskmovq_r, 3, C_BAD, 0);
         expect_flag("maskmovdqu not bad (64)", 64, maskmovdqu_r, 4, C_BAD, 0);
         expect_flag("movdq2q not bad (64)", 64, movdq2q_r, 4, C_BAD, 0);
-        expect_flag("movq mm not bad (64)", 64, movq_r, 3, C_BAD, 0);
         expect_flag("movq xmm not bad (64)", 64, movq66_r, 4, C_BAD, 0);
-        expect_flag("movq mm m64 not bad (64)", 64, movq_m, 3, C_BAD, 0);
         expect_flag("movq xmm m64 not bad (64)", 64, movq66_m, 4, C_BAD, 0);
+        // The plain 0F D6 is not a MOVQ form: the SDM spells the mm store out
+        // as 0F 7F and the xmm store as 66 0F D6, so the bare encoding names
+        // no instruction (binutils and LLVM both decode no instruction here).
+        static const uint8_t movq_bare_r[]  = { 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq_bare_m[]  = { 0x0F, 0xD6, 0x00 };
+        expect_flag("0F D6 r bad (64)", 64, movq_bare_r, 3, C_BAD, 1);
+        expect_flag("0F D6 m bad (64)", 64, movq_bare_m, 3, C_BAD, 1);
 
         // The 0F 38 map holds the remaining memory-only r/m operands:
         // MOVNTDQA, the INVEPT/INVVPID/INVPCID descriptors, MOVBE (whose F2
