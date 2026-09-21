@@ -291,6 +291,128 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
     (void)attr;
 }
 
+// The table marks 0F 00 / 0F 01 / 0F 02 / 0F 03 unknown as a whole, which is
+// what the group needed while none of its forms were modelled. The SDM does
+// define them, so this rebuilds their operand sets from the ModR/M byte, after
+// the whole-set unknown has been assigned:
+//
+//   0F 00 /0 SLDT, /1 STR    r/m16 written
+//   0F 00 /2 LLDT, /3 LTR    r/m16 read (fixed 16-bit), LDTR/TR written
+//   0F 00 /4 VERR, /5 VERW   r/m16 read (fixed 16-bit), ZF written
+//   0F 01 /0 SGDT, /1 SIDT   memory written (memory only: mod=3 is #UD)
+//   0F 01 /2 LGDT, /3 LIDT   memory read (memory only), GDTR/IDTR written
+//   0F 01 /4 SMSW            r/m16 written
+//   0F 01 /6 LMSW            r/m16 read (fixed 16-bit), CR0 written
+//   0F 01 /7 INVLPG          memory read (memory only)
+//   0F 02 LAR, 0F 03 LSL     reg written at the operand size, r/m16 read, ZF
+//
+// SLDT/STR/SMSW write their register destination at the operand size, because
+// the SDM zero-extends the 16-bit selector into a 64-bit destination, clears
+// (or leaves undefined) the high half of a 32-bit one, and zero-extends CR0
+// into the 32-bit form of SMSW. The r/m16 operands that are only read keep the
+// 16 bits they consume: LLDT/LTR/VERR/VERW/LMSW fix their operand size at 16
+// bits, and LAR/LSL use only the selector's low 16 bits.
+//
+// 0F 00 /6 /7, 0F 01 /5, the register forms of SGDT/SIDT/LGDT/LIDT/INVLPG
+// (which the SDM makes #UD) and the register forms of 0F 01 (SERIALIZE,
+// RDPKRU/WRPKRU, SWAPGS/RDTSCP, MONITOR/MWAIT, CLAC/STAC, XGETBV/XSETBV,
+// VMFUNC/XEND/XTEST, the VMX and SVM groups) stay undefined and keep C_UNDEF;
+// a VEX/EVEX/XOP encoding never defines them either, and falls through here.
+//
+// ea_set / ea_set2 hold the addressing registers parse_modrm recorded, which
+// the memory forms keep; the register forms have none. Returns 1 when the
+// form was modelled.
+static int undef_sys_operands(struct xde_instr *diza, uint64_t ea_set,
+                              uint64_t ea_set2)
+{
+    unsigned mod = diza->modrm >> 6;
+    unsigned reg = (diza->modrm >> 3) & 7;
+    unsigned rm = diza->modrm & 7;
+    int rex = (diza->rex != 0) || (diza->enc != XDE_ENC_LEGACY);
+    int sz = (int)diza->defdata;
+    int dsz = (diza->mode == 64 && sz == 4) ? 8 : sz;
+    // ModR/M.reg / r/m with their REX/REX2 extension bits (r16-r31 need bit 4).
+    unsigned regx = ((unsigned)diza->rex_r4 << 4) |
+                    ((unsigned)diza->rex_r << 3) | reg;
+    unsigned rmreg = ((unsigned)diza->rex_b4 << 4) |
+                     ((unsigned)diza->rex_b << 3) | rm;
+    uint8_t c2 = diza->opcode2;
+    uint64_t src = 0, dst = 0, src2 = 0, dst2 = 0;
+    uint64_t greg = 0, grm = 0;
+
+    if (diza->map != XDE_MAP_0F || (diza->enc != XDE_ENC_LEGACY &&
+                                    diza->enc != XDE_ENC_REX2))
+        return 0;
+
+    if (c2 == 0x02 || c2 == 0x03) {             // LAR / LSL
+        dst = gp_set(dsz, regx, rex, &greg) | XSET_FL;
+        dst2 = greg;
+        if (mod == 3) {
+            src = gp_set(2, rmreg, rex, &grm);
+            src2 = grm;
+        } else {
+            src = XSET_MEM;                     // 16 bits of the descriptor
+        }
+    } else if (c2 == 0x00) {
+        if (reg <= 1) {                         // SLDT / STR
+            if (mod == 3) {
+                dst = gp_set(dsz, rmreg, rex, &grm);
+                dst2 = grm;
+            } else {
+                dst = XSET_MEM;
+            }
+        } else if (reg <= 5) {                  // LLDT / LTR / VERR / VERW
+            if (mod == 3) {
+                src = gp_set(2, rmreg, rex, &grm);
+                src2 = grm;
+            } else {
+                src = XSET_MEM;
+            }
+            dst = (reg <= 3) ? XSET_OTHER : XSET_FL;
+        } else {
+            return 0;                           // /6 and /7 are not defined
+        }
+    } else if (c2 == 0x01) {
+        if (mod == 3) {
+            // The register forms of this group belong to the instructions left
+            // above, except SMSW /4 and LMSW /6, whose r/m16 the SDM defines
+            // with a register operand.
+            if (reg == 4) {
+                dst = gp_set(dsz, rmreg, rex, &grm);
+                dst2 = grm;
+            } else if (reg == 6) {
+                src = gp_set(2, rmreg, rex, &grm);
+                src2 = grm;
+                dst = XSET_OTHER;
+            } else {
+                return 0;
+            }
+        } else if (reg <= 1) {                  // SGDT / SIDT
+            dst = XSET_MEM;
+        } else if (reg <= 3) {                  // LGDT / LIDT
+            src = XSET_MEM;
+            dst = XSET_OTHER;
+        } else if (reg == 4) {                  // SMSW
+            dst = XSET_MEM;
+        } else if (reg == 6) {                  // LMSW
+            src = XSET_MEM;
+            dst = XSET_OTHER;
+        } else if (reg == 7) {                  // INVLPG
+            src = XSET_MEM;
+        } else {
+            return 0;                           // /5
+        }
+    } else {
+        return 0;
+    }
+
+    diza->src_set = ea_set | src;
+    diza->src_set2 = ea_set2 | src2;
+    diza->dst_set = dst;
+    diza->dst_set2 = dst2;
+    return 1;
+}
+
 static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                               unsigned mod, unsigned reg, unsigned rm)
 {
@@ -847,6 +969,7 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
     uint32_t attr, gattr;
     unsigned i, dbytes;
     int twice, rex_seen = 0;
+    uint64_t ea_set = 0, ea_set2 = 0;
 
     if (!opcode || !diza)
         return 0;
@@ -1238,6 +1361,14 @@ got_opcode:
 
         if (!parse_modrm(&cur, diza, attr))
             return 0;
+        // undef_sys_operands() rebuilds the sets of the 0F 00 / 0F 01 /
+        // 0F 02 / 0F 03 forms below, after the whole-set unknown has replaced
+        // them; the addressing registers parse_modrm just recorded are the one
+        // part of the sets those forms still need.
+        if (attr & XA_UNDEF) {
+            ea_set = diza->src_set;
+            ea_set2 = diza->src_set2;
+        }
         apply_modrm_usage(diza, attr, diza->modrm >> 6,
                           (diza->modrm >> 3) & 7, diza->modrm & 7);
     } else if (attr & XA_MOFFS) {
@@ -1263,6 +1394,12 @@ got_opcode:
         diza->dst_set = XSET_UNDEF;
         diza->src_set2 = XSET2_ALL;
         diza->dst_set2 = XSET2_ALL;
+        // Most forms of 0F 00 / 0F 01 / 0F 02 / 0F 03 have SDM-defined
+        // operands, so they replace the whole-set unknown above with what the
+        // ModR/M byte names and stop being undef. Whatever the table leaves
+        // unmodelled keeps the sets above and C_UNDEF.
+        if (undef_sys_operands(diza, ea_set, ea_set2))
+            diza->flag &= ~C_UNDEF;
     }
 
     dbytes = imm_bytes(attr, diza);

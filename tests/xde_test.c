@@ -187,6 +187,32 @@ static void expect_set(const char *name, unsigned mode, const uint8_t *b, unsign
            (unsigned long long)bit, want ? "set" : "clear");
 }
 
+// Assert that a whole object set holds exactly `want`. XSET_UNDEF is all ones,
+// so a "contains" check cannot tell a modelled form from a wholly unknown one;
+// only an exact comparison can. sel: 0 = src_set, 1 = dst_set, 2 = src_set2,
+// 3 = dst_set2.
+static void expect_seteq(const char *name, unsigned mode, const uint8_t *b, unsigned n,
+                         int sel, uint64_t want)
+{
+    struct xde_instr d;
+    uint64_t got;
+
+    if (xde_disasm_buf(b, n, &d, mode) != (int)n) {
+        fail(name, "decode length mismatch");
+        return;
+    }
+    got = sel == 0 ? d.src_set : sel == 1 ? d.dst_set
+                     : sel == 2 ? d.src_set2 : d.dst_set2;
+    if (got != want) {
+        char msg[256];
+        sprintf(msg, "sel=%d want=0x%llX got=0x%llX", sel,
+                (unsigned long long)want, (unsigned long long)got);
+        fail(name, msg);
+        return;
+    }
+    printf("ok %-28s set%d 0x%llX\n", name, sel, (unsigned long long)want);
+}
+
 // Assert that one flag bit is set (want=1) or clear (want=0).
 static void expect_flag(const char *name, unsigned mode, const uint8_t *b, unsigned n,
                         uint64_t bit, int want)
@@ -1682,12 +1708,132 @@ int main(void)
         expect_flag("C6 FA still bad", 64, xabort_bad, 3, C_BAD, 1);
     }
     {
-        // 0F 00 / 0F 01 keep the whole-set XA_UNDEF model, so their sets stay
-        // unassertable; C_UNDEF is the only observable anchor.
-        static const uint8_t sldt[] = { 0x0F, 0x00, 0xC0 };
-        static const uint8_t smsw[] = { 0x0F, 0x01, 0xE0 };
-        expect_flag("0F 00 undef", 64, sldt, 3, C_UNDEF, 1);
-        expect_flag("0F 01 undef", 64, smsw, 3, C_UNDEF, 1);
+        // 0F 00 / 0F 01 / 0F 02 / 0F 03: the table marks the whole group
+        // unknown, but the SDM defines the operand of every form except the
+        // 0F 00 /6 /7 holes, 0F 01 /5 and the register forms of 0F 01. Those
+        // forms get their sets rebuilt from the ModR/M byte; the rest keep the
+        // whole-set unknown and C_UNDEF. XSET_UNDEF is all ones, so only an
+        // exact-set check can tell a modelled form from an unknown one.
+        //
+        // SLDT / STR / SMSW write their register destination at the operand
+        // size: the SDM zero-extends the selector into a 64-bit destination
+        // and clears (or leaves undefined) the high half of a 32-bit one, and
+        // SMSW r32 zero-extends CR0. The r/m16 operands that are only read
+        // keep the 16 bits they consume: LLDT/LTR/VERR/VERW/LMSW fix their
+        // operand size at 16 bits, and LAR/LSL use the selector's low 16 bits.
+        static const uint8_t sldt_r[]   = { 0x0F, 0x00, 0xC0 };       // sldt eax
+        static const uint8_t sldt_r16[] = { 0x66, 0x0F, 0x00, 0xC0 }; // sldt ax
+        static const uint8_t str_r16[]  = { 0x66, 0x0F, 0x00, 0xC8 }; // str ax
+        static const uint8_t sldt_m[]   = { 0x0F, 0x00, 0x00 };       // sldt [rax]
+        static const uint8_t lldt_r[]   = { 0x0F, 0x00, 0xD0 };       // lldt ax
+        static const uint8_t ltr_r[]    = { 0x0F, 0x00, 0xD8 };       // ltr ax
+        static const uint8_t lldt_m[]   = { 0x0F, 0x00, 0x10 };       // lldt [rax]
+        static const uint8_t verr_r[]   = { 0x0F, 0x00, 0xE0 };       // verr ax
+        static const uint8_t verw_r[]   = { 0x0F, 0x00, 0xE8 };       // verw ax
+        static const uint8_t verr_m[]   = { 0x0F, 0x00, 0x20 };       // verr [rax]
+        static const uint8_t sgdt_m[]   = { 0x0F, 0x01, 0x00 };       // sgdt [rax]
+        static const uint8_t sidt_m[]   = { 0x0F, 0x01, 0x08 };       // sidt [rax]
+        static const uint8_t lgdt_m[]   = { 0x0F, 0x01, 0x10 };       // lgdt [rax]
+        static const uint8_t lidt_m[]   = { 0x0F, 0x01, 0x18 };       // lidt [rax]
+        static const uint8_t smsw_r[]   = { 0x0F, 0x01, 0xE0 };       // smsw eax
+        static const uint8_t smsw_m[]   = { 0x0F, 0x01, 0x20 };       // smsw [rax]
+        static const uint8_t lmsw_r[]   = { 0x0F, 0x01, 0xF0 };       // lmsw ax
+        static const uint8_t lmsw_m[]   = { 0x0F, 0x01, 0x30 };       // lmsw [rax]
+        static const uint8_t invlpg_m[] = { 0x0F, 0x01, 0x38 };       // invlpg [rax]
+        static const uint8_t lar_r[]    = { 0x0F, 0x02, 0xC1 };       // lar eax,ecx
+        static const uint8_t lar_r16[]  = { 0x66, 0x0F, 0x02, 0xC1 }; // lar ax,cx
+        static const uint8_t lar_r8[]   = { 0x44, 0x0F, 0x02, 0xC1 }; // lar r8d,ecx
+        static const uint8_t lar_w[]    = { 0x48, 0x0F, 0x02, 0xC1 }; // lar rax,rcx
+        static const uint8_t lsl_r[]    = { 0x0F, 0x03, 0xC1 };       // lsl eax,ecx
+        static const uint8_t lar_m[]    = { 0x0F, 0x02, 0x00 };       // lar eax,[rax]
+        static const uint8_t rex2_lar[] = { 0xD5, 0x80, 0x02, 0xC1 }; // lar eax,ecx
+        static const uint8_t rex2_sldt[] = { 0xD5, 0x90, 0x00, 0xC0 }; // sldt r16
+
+        // The register forms of SGDT/SIDT/LGDT/LIDT and INVLPG are #UD, and
+        // 0F 00 /6 /7, 0F 01 /5 and the 0F 01 register group (SERIALIZE,
+        // RDPKRU, SWAPGS, VMCALL, XGETBV...) are not modelled yet: all of
+        // those stay wholly unknown. A VEX encoding reaches this opcode too,
+        // and defines nothing either.
+        static const uint8_t grp6_6[]   = { 0x0F, 0x00, 0xF0 };
+        static const uint8_t grp6_7[]   = { 0x0F, 0x00, 0xF8 };
+        static const uint8_t grp7_5[]   = { 0x0F, 0x01, 0xE8 }; // SERIALIZE
+        static const uint8_t grp7_5m[]  = { 0x0F, 0x01, 0x28 };
+        static const uint8_t vmcall[]   = { 0x0F, 0x01, 0xC1 };
+        static const uint8_t monitor[]  = { 0x0F, 0x01, 0xC8 };
+        static const uint8_t xgetbv[]   = { 0x0F, 0x01, 0xD0 };
+        static const uint8_t sgdt_r[]   = { 0x0F, 0x01, 0xC0 };
+        static const uint8_t vex_grp6[] = { 0xC5, 0xF8, 0x00, 0xC0 };
+
+        expect_seteq("sldt eax dst", 64, sldt_r, 3, 1, XSET_RAX);
+        expect_seteq("sldt eax src", 64, sldt_r, 3, 0, 0);
+        expect_seteq("sldt eax (32) dst", 32, sldt_r, 3, 1, XSET_EAX);
+        expect_seteq("sldt ax dst", 64, sldt_r16, 4, 1, XSET_AX);
+        expect_seteq("sldt ax src", 64, sldt_r16, 4, 0, 0);
+        expect_seteq("str ax dst", 64, str_r16, 4, 1, XSET_AX);
+        expect_seteq("str ax src", 64, str_r16, 4, 0, 0);
+        expect_seteq("sldt [rax] dst", 64, sldt_m, 3, 1, XSET_MEM);
+        expect_seteq("sldt [rax] src", 64, sldt_m, 3, 0, XSET_RAX);
+        expect_seteq("lldt ax src", 64, lldt_r, 3, 0, XSET_AX);
+        expect_seteq("lldt ax dst", 64, lldt_r, 3, 1, XSET_OTHER);
+        expect_seteq("ltr ax src", 64, ltr_r, 3, 0, XSET_AX);
+        expect_seteq("ltr ax dst", 64, ltr_r, 3, 1, XSET_OTHER);
+        expect_seteq("lldt [rax] src", 64, lldt_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("lldt [rax] dst", 64, lldt_m, 3, 1, XSET_OTHER);
+        expect_seteq("verr ax src", 64, verr_r, 3, 0, XSET_AX);
+        expect_seteq("verr ax dst", 64, verr_r, 3, 1, XSET_FL);
+        expect_seteq("verw ax src", 64, verw_r, 3, 0, XSET_AX);
+        expect_seteq("verw ax dst", 64, verw_r, 3, 1, XSET_FL);
+        expect_seteq("verr [rax] src", 64, verr_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("verr [rax] dst", 64, verr_m, 3, 1, XSET_FL);
+        expect_seteq("sgdt [rax] dst", 64, sgdt_m, 3, 1, XSET_MEM);
+        expect_seteq("sgdt [rax] src", 64, sgdt_m, 3, 0, XSET_RAX);
+        expect_seteq("sidt [rax] dst", 64, sidt_m, 3, 1, XSET_MEM);
+        expect_seteq("sidt [rax] src", 64, sidt_m, 3, 0, XSET_RAX);
+        expect_seteq("lgdt [rax] src", 64, lgdt_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("lgdt [rax] dst", 64, lgdt_m, 3, 1, XSET_OTHER);
+        expect_seteq("lidt [rax] src", 64, lidt_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("lidt [rax] dst", 64, lidt_m, 3, 1, XSET_OTHER);
+        expect_seteq("smsw eax dst", 64, smsw_r, 3, 1, XSET_RAX);
+        expect_seteq("smsw eax src", 64, smsw_r, 3, 0, 0);
+        expect_seteq("smsw [rax] dst", 64, smsw_m, 3, 1, XSET_MEM);
+        expect_seteq("smsw [rax] src", 64, smsw_m, 3, 0, XSET_RAX);
+        expect_seteq("lmsw ax src", 64, lmsw_r, 3, 0, XSET_AX);
+        expect_seteq("lmsw ax dst", 64, lmsw_r, 3, 1, XSET_OTHER);
+        expect_seteq("lmsw [rax] src", 64, lmsw_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("lmsw [rax] dst", 64, lmsw_m, 3, 1, XSET_OTHER);
+        expect_seteq("invlpg [rax] src", 64, invlpg_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("invlpg [rax] dst", 64, invlpg_m, 3, 1, 0);
+        expect_seteq("lar eax,ecx dst", 64, lar_r, 3, 1, XSET_RAX | XSET_FL);
+        expect_seteq("lar eax,ecx src", 64, lar_r, 3, 0, XSET_CX);
+        expect_seteq("lar ax,cx dst", 64, lar_r16, 4, 1, XSET_AX | XSET_FL);
+        expect_seteq("lar ax,cx src", 64, lar_r16, 4, 0, XSET_CX);
+        expect_seteq("lar r8d,ecx dst", 64, lar_r8, 4, 1, XSET_R8 | XSET_FL);
+        expect_seteq("lar r8d,ecx src", 64, lar_r8, 4, 0, XSET_CX);
+        expect_seteq("lar rax,rcx dst", 64, lar_w, 4, 1, XSET_RAX | XSET_FL);
+        expect_seteq("lsl eax,ecx dst", 64, lsl_r, 3, 1, XSET_RAX | XSET_FL);
+        expect_seteq("lsl eax,ecx src", 64, lsl_r, 3, 0, XSET_CX);
+        expect_seteq("lar eax,[rax] src", 64, lar_m, 3, 0, XSET_RAX | XSET_MEM);
+        expect_seteq("lar eax,[rax] dst", 64, lar_m, 3, 1, XSET_RAX | XSET_FL);
+        expect_seteq("rex2 lar dst", 64, rex2_lar, 4, 1, XSET_RAX | XSET_FL);
+        expect_seteq("rex2 sldt r16 dst2", 64, rex2_sldt, 4, 3, XSET2_R16);
+        expect_seteq("rex2 sldt r16 dst", 64, rex2_sldt, 4, 1, 0);
+
+        expect_flag("sldt eax not undef", 64, sldt_r, 3, C_UNDEF, 0);
+        expect_flag("lar eax,ecx not undef", 64, lar_r, 3, C_UNDEF, 0);
+        expect_flag("smsw eax not undef", 64, smsw_r, 3, C_UNDEF, 0);
+        expect_seteq("0F 00 /6 undef", 64, grp6_6, 3, 1, XSET_UNDEF);
+        expect_seteq("0F 00 /7 undef", 64, grp6_7, 3, 1, XSET_UNDEF);
+        expect_seteq("0F 01 /5 undef", 64, grp7_5, 3, 1, XSET_UNDEF);
+        expect_seteq("0F 01 /5 m undef", 64, grp7_5m, 3, 1, XSET_UNDEF);
+        expect_seteq("vmcall undef", 64, vmcall, 3, 1, XSET_UNDEF);
+        expect_seteq("monitor undef", 64, monitor, 3, 1, XSET_UNDEF);
+        expect_seteq("xgetbv undef", 64, xgetbv, 3, 1, XSET_UNDEF);
+        expect_seteq("sgdt r undef", 64, sgdt_r, 3, 1, XSET_UNDEF);
+        expect_seteq("vex 0F 00 undef", 64, vex_grp6, 4, 1, XSET_UNDEF);
+        expect_flag("0F 00 /6 keeps undef", 64, grp6_6, 3, C_UNDEF, 1);
+        expect_flag("0F 01 /5 keeps undef", 64, grp7_5, 3, C_UNDEF, 1);
+        expect_flag("vmcall keeps undef", 64, vmcall, 3, C_UNDEF, 1);
+        expect_flag("vex 0F 00 keeps undef", 64, vex_grp6, 4, C_UNDEF, 1);
     }
 
     // XA_BAD means "not a usable encoding in any mode", so the legacy forms
