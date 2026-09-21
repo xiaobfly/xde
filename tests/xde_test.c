@@ -2024,6 +2024,51 @@ int main(void)
         expect_flag("0F FE F3   bad", 64, (const uint8_t[]){0xF2, 0x0F, 0xFE, 0x00}, 4, C_BAD, 1);
     }
 
+    // The 0F slots the SDM leaves blank under every prefix name no
+    // instruction, so they are rejected rather than flagged, and an opcode
+    // whose extra prefix does not take part in it keeps its instruction:
+    // F3 0F 19 is still the NOP with a redundant REP and 66 0F 1F is its
+    // word-sized form. F2 0F 13 is the other side of that line -- the SDM
+    // gives MOVLPS no F2 reading at all, so it names nothing.
+    {
+        static const uint8_t undef_04[] = { 0x0F, 0x04, 0xC0 };
+        static const uint8_t undef_0a[] = { 0x0F, 0x0A, 0xC0 };
+        static const uint8_t undef_0c[] = { 0x0F, 0x0C, 0xC0 };
+        static const uint8_t undef_24[] = { 0x0F, 0x24, 0xC0 };
+        static const uint8_t undef_25[] = { 0x0F, 0x25, 0xC0 };
+        static const uint8_t undef_26[] = { 0x0F, 0x26, 0xC0 };
+        static const uint8_t undef_27[] = { 0x0F, 0x27, 0xC0 };
+        static const uint8_t undef_36[] = { 0x0F, 0x36, 0xC0 };
+        static const uint8_t undef_39[] = { 0x0F, 0x39, 0xC0 };
+        static const uint8_t undef_3c[] = { 0x0F, 0x3C, 0xC0 };
+        static const uint8_t undef_3f[] = { 0x0F, 0x3F, 0xC0 };
+        static const uint8_t emms[]      = { 0x0F, 0x77 };
+        static const uint8_t emms_66[]   = { 0x66, 0x0F, 0x77 };
+        static const uint8_t emms_f2[]   = { 0xF2, 0x0F, 0x77 };
+        static const uint8_t nop_f3_19[] = { 0xF3, 0x0F, 0x19, 0x00 };
+        static const uint8_t nop_66_1f[] = { 0x66, 0x0F, 0x1F, 0xC0 };
+        static const uint8_t nop_f2_1d[] = { 0xF2, 0x0F, 0x1D, 0xC0 };
+        static const uint8_t movlps_f2[] = { 0xF2, 0x0F, 0x13, 0x00 };
+        expect_fail("0F 04 undefined", 64, undef_04, 3);
+        expect_fail("0F 0A undefined", 64, undef_0a, 3);
+        expect_fail("0F 0C undefined", 64, undef_0c, 3);
+        expect_fail("0F 24 undefined", 64, undef_24, 3);
+        expect_fail("0F 25 undefined", 64, undef_25, 3);
+        expect_fail("0F 26 undefined", 64, undef_26, 3);
+        expect_fail("0F 27 undefined", 64, undef_27, 3);
+        expect_fail("0F 36 undefined", 64, undef_36, 3);
+        expect_fail("0F 39 undefined", 64, undef_39, 3);
+        expect_fail("0F 3C undefined", 64, undef_3c, 3);
+        expect_fail("0F 3F undefined", 64, undef_3f, 3);
+        expect_flag("emms ok", 64, emms, 2, C_BAD, 0);
+        expect_flag("66 0F 77 bad", 64, emms_66, 3, C_BAD, 1);
+        expect_flag("F2 0F 77 bad", 64, emms_f2, 3, C_BAD, 1);
+        expect_flag("F3 0F 19 redundant rep ok", 64, nop_f3_19, 4, C_BAD, 0);
+        expect_flag("66 0F 1F word nop ok", 64, nop_66_1f, 4, C_BAD, 0);
+        expect_flag("F2 0F 1D redundant rep ok", 64, nop_f2_1d, 4, C_BAD, 0);
+        expect_flag("F2 0F 13 bad", 64, movlps_f2, 4, C_BAD, 1);
+    }
+
     // System groups: CR/DR moves, RDRAND/RDSEED, fences, FS/GS base, save/restore, prefetch.
     {
         // 0F 20-23: the reg field names the CR/DR operand, r/m names the GPR.
