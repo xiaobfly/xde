@@ -1195,7 +1195,8 @@ int main(void)
     }
     {
         // 0F C7 /6 /7 mod=3: RDRAND/RDSEED, r/m is a plain GPR destination
-        // and there is no source operand.
+        // and there is no source operand. Both report success in CF, which is
+        // the only flag they touch (the others are cleared).
         static const uint8_t rdrand[] = { 0x0F, 0xC7, 0xF0 };
         static const uint8_t rdseed[] = { 0x0F, 0xC7, 0xF8 };
         static const uint8_t rdrand64[] = { 0x48, 0x0F, 0xC7, 0xF0 };
@@ -1207,6 +1208,10 @@ int main(void)
         expect_set("rdseed (no dst other)", 64, rdseed, 3, 1, XSET_OTHER, 0);
         expect_set("rdrand rax dst RAX", 64, rdrand64, 4, 1, XSET_RAX, 1);
         expect_set("rdrand rax (no src other)", 64, rdrand64, 4, 0, XSET_OTHER, 0);
+        expect_set("rdrand eax dst FL", 64, rdrand, 3, 1, XSET_FL, 1);
+        expect_set("rdseed eax dst FL", 64, rdseed, 3, 1, XSET_FL, 1);
+        expect_set("rdrand rax dst FL", 64, rdrand64, 4, 1, XSET_FL, 1);
+        expect_set("rdrand (no src FL)", 64, rdrand, 3, 0, XSET_FL, 0);
     }
     {
         // 0F AE mod=3: /5 /6 /7 are LFENCE/MFENCE/SFENCE and take no operand
@@ -1316,6 +1321,59 @@ int main(void)
         }
     }
     {
+        // CMPXCHG8B (0F C7 /1) compares and conditionally loads the EDX:EAX
+        // pair, and REX.W promotes it to CMPXCHG16B over RDX:RAX. The pair is
+        // therefore both read and written, and ZF reports the comparison.
+        // CMPXCHG8B keeps its 32-bit halves even in 64-bit mode, so the
+        // 64-bit-width bits of RDX:RAX stay clear on that form.
+        static const uint8_t cmpxchg8b_c[] = { 0x0F, 0xC7, 0x09 };
+        static const uint8_t cmpxchg16b_c[] = { 0x48, 0x0F, 0xC7, 0x09 };
+        expect_set("cmpxchg8b src EAX", 64, cmpxchg8b_c, 3, 0, XSET_EAX, 1);
+        expect_set("cmpxchg8b src EDX", 64, cmpxchg8b_c, 3, 0, XSET_EDX, 1);
+        expect_set("cmpxchg8b src (32-bit pair)", 64, cmpxchg8b_c, 3, 0,
+                   XSET_RDX & ~XSET_EDX, 0);
+        expect_set("cmpxchg8b dst EAX", 64, cmpxchg8b_c, 3, 1, XSET_EAX, 1);
+        expect_set("cmpxchg8b dst EDX", 64, cmpxchg8b_c, 3, 1, XSET_EDX, 1);
+        expect_set("cmpxchg8b dst FL", 64, cmpxchg8b_c, 3, 1, XSET_FL, 1);
+        expect_set("cmpxchg8b (32) src EDX", 32, cmpxchg8b_c, 3, 0, XSET_EDX, 1);
+        expect_set("cmpxchg16b src RAX", 64, cmpxchg16b_c, 4, 0, XSET_RAX, 1);
+        expect_set("cmpxchg16b src RDX", 64, cmpxchg16b_c, 4, 0, XSET_RDX, 1);
+        expect_set("cmpxchg16b dst RAX", 64, cmpxchg16b_c, 4, 1, XSET_RAX, 1);
+        expect_set("cmpxchg16b dst RDX", 64, cmpxchg16b_c, 4, 1, XSET_RDX, 1);
+        expect_set("cmpxchg16b dst FL", 64, cmpxchg16b_c, 4, 1, XSET_FL, 1);
+    }
+    {
+        // XSAVE/XSAVEOPT/XSAVEC/XSAVES and XRSTOR/XRSTORS take the
+        // state-component mask in EDX:EAX, an input shared by all six. The
+        // other memory forms of these groups (FXSAVE/FXRSTOR, LDMXCSR/
+        // STMXCSR, CLFLUSH/CLWB and the VMCS-pointer forms) take no mask.
+        static const uint8_t xsave_c[] = { 0x0F, 0xAE, 0x21 };
+        static const uint8_t xsaveopt_c[] = { 0x0F, 0xAE, 0x31 };
+        static const uint8_t xrstor_c[] = { 0x0F, 0xAE, 0x29 };
+        static const uint8_t xsavec_c[] = { 0x0F, 0xC7, 0x21 };
+        static const uint8_t xsaves_c[] = { 0x0F, 0xC7, 0x29 };
+        static const uint8_t xrstors_c[] = { 0x0F, 0xC7, 0x19 };
+        static const uint8_t fxrstor_c[] = { 0x0F, 0xAE, 0x09 };
+        static const uint8_t stmxcsr_c[] = { 0x0F, 0xAE, 0x19 };
+        static const uint8_t clwb_c[] = { 0x66, 0x0F, 0xAE, 0x31 };
+        static const uint8_t vmptrld_c[] = { 0x0F, 0xC7, 0x31 };
+        expect_set("xsave src EAX", 64, xsave_c, 3, 0, XSET_EAX, 1);
+        expect_set("xsave src EDX", 64, xsave_c, 3, 0, XSET_EDX, 1);
+        expect_set("xsave (no dst EDX)", 64, xsave_c, 3, 1, XSET_EDX, 0);
+        expect_set("xsaveopt src EDX", 64, xsaveopt_c, 3, 0, XSET_EDX, 1);
+        expect_set("xrstor src EAX", 64, xrstor_c, 3, 0, XSET_EAX, 1);
+        expect_set("xrstor src EDX", 64, xrstor_c, 3, 0, XSET_EDX, 1);
+        expect_set("xsavec src EDX", 64, xsavec_c, 3, 0, XSET_EDX, 1);
+        expect_set("xsaves src EAX", 64, xsaves_c, 3, 0, XSET_EAX, 1);
+        expect_set("xsaves src EDX", 64, xsaves_c, 3, 0, XSET_EDX, 1);
+        expect_set("xrstors src EAX", 64, xrstors_c, 3, 0, XSET_EAX, 1);
+        expect_set("xrstors src EDX", 64, xrstors_c, 3, 0, XSET_EDX, 1);
+        expect_set("fxrstor (no src EDX)", 64, fxrstor_c, 3, 0, XSET_EDX, 0);
+        expect_set("stmxcsr (no src EDX)", 64, stmxcsr_c, 3, 0, XSET_EDX, 0);
+        expect_set("clwb (no src EDX)", 64, clwb_c, 4, 0, XSET_EDX, 0);
+        expect_set("vmptrld (no src EDX)", 64, vmptrld_c, 3, 0, XSET_EDX, 0);
+    }
+    {
         // 0F 18 /0-/3 and 0F 0D /0 read memory and name no register operand;
         // 0F 18 /4-/7, 0F 19, 0F 1D and 0F 1F are NOPs and access nothing.
         static const uint8_t prefetchnta[] = { 0x0F, 0x18, 0x00 };
@@ -1366,6 +1424,21 @@ int main(void)
         expect_set("0F 18 /4 r/m nop (no dst other)", 64, nop18_4r, 3, 1, XSET_OTHER, 0);
         expect_set("endbr64 (no src other)", 64, endbr64, 4, 0, XSET_OTHER, 0);
         expect_set("endbr64 (no dst other)", 64, endbr64, 4, 1, XSET_OTHER, 0);
+        // PREFETCHh and PREFETCH/PREFETCHW are defined only with a memory
+        // operand, so their mod=3 encodings are reserved; 0F 18 /4-/7 keeps
+        // its NOP form at mod=3.
+        static const uint8_t prefetch_18_0[] = { 0x0F, 0x18, 0xC0 };
+        static const uint8_t prefetch_18_3[] = { 0x0F, 0x18, 0xD8 };
+        static const uint8_t prefetch_0d_0[] = { 0x0F, 0x0D, 0xC0 };
+        static const uint8_t prefetch_0d_1[] = { 0x0F, 0x0D, 0xC8 };
+        expect_flag("0F 18 /0 m3 bad", 64, prefetch_18_0, 3, C_BAD, 1);
+        expect_flag("0F 18 /3 m3 bad", 64, prefetch_18_3, 3, C_BAD, 1);
+        expect_flag("0F 0D /0 m3 bad", 64, prefetch_0d_0, 3, C_BAD, 1);
+        expect_flag("0F 0D /1 m3 bad", 64, prefetch_0d_1, 3, C_BAD, 1);
+        expect_flag("0F 18 /0 m3 bad (32)", 32, prefetch_18_0, 3, C_BAD, 1);
+        expect_flag("prefetchnta mem not bad", 64, prefetchnta, 3, C_BAD, 0);
+        expect_flag("prefetchw mem not bad", 64, prefetchw, 3, C_BAD, 0);
+        expect_flag("0F 18 /4 m3 nop not bad", 64, nop18_4r, 3, C_BAD, 0);
     }
     {
         // 0F 1E without a prefix is NOP Ev, the same class as 0F 1F: neither

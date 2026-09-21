@@ -390,6 +390,23 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // Forms whose reg field is not a register operand at all.
     int reg_not_dst = rdrand || fence || incssp || fsgsbase || endbr || nop1e ||
                       nop_ea || prefetch_ea || rdssp;
+    // 0F C7 /1 with a memory operand is CMPXCHG8B, or CMPXCHG16B once REX.W
+    // widens the operation. Both compare and conditionally load the EDX:EAX
+    // pair (RDX:RAX for the 128-bit form), which is the one register pair the
+    // r/m rule below cannot see. CMPXCHG8B keeps its 32-bit halves even in
+    // 64-bit mode, so REX.W alone selects the 64-bit pair.
+    int cmpxchg8b = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                     c2 == 0xC7 && mod != 3 && reg == 1);
+    // XSAVE/XSAVEOPT/XSAVEC/XSAVES and XRSTOR/XRSTORS all read the
+    // state-component mask from EDX:EAX. The remaining memory forms of these
+    // groups (FXSAVE/FXRSTOR, LDMXCSR/STMXCSR, CLFLUSH/CLWB -- /6 with the 66
+    // prefix -- and the VMCS-pointer forms) take no mask.
+    int xsave_mask = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                      mod != 3 &&
+                      ((c2 == 0xAE &&
+                        (reg == 4 || reg == 5 ||
+                         (reg == 6 && diza->p_66 == 0))) ||
+                       (c2 == 0xC7 && (reg == 3 || reg == 4 || reg == 5))));
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -477,8 +494,9 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                 diza->dst_set |= XSET_OTHER;
             }
         } else if (rdrand) {
-            // RDRAND/RDSEED write r/m and read nothing.
-            diza->dst_set |= rset;
+            // RDRAND/RDSEED write r/m and read nothing; CF reports whether
+            // the value was valid.
+            diza->dst_set |= rset | XSET_FL;
             diza->dst_set2 |= rset2;
         } else if (fsgsbase) {
             // RDFSBASE/RDGSBASE write r/m; WRFSBASE/WRGSBASE read it and write
@@ -549,6 +567,17 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
         else if (diza->enc != XDE_ENC_LEGACY && diza->enc != XDE_ENC_REX2)
             diza->src_set |= XSET_MEM;
     }
+
+    // The compared/loaded pair is read as well as written, and ZF reports the
+    // outcome of the comparison.
+    if (cmpxchg8b) {
+        int psz = (diza->mode == 64 && diza->rex_w) ? 8 : 4;
+        uint64_t pair = gp_set(psz, 0, rex, NULL) | gp_set(psz, 2, rex, NULL);
+        diza->src_set |= pair;
+        diza->dst_set |= pair | XSET_FL;
+    }
+    if (xsave_mask)
+        diza->src_set |= XSET_EAX | XSET_EDX;
 }
 
 static void apply_implicit_gp(struct xde_instr *diza, uint32_t attr)
@@ -1114,6 +1143,14 @@ got_opcode:
         if (diza->opcode == 0x0F && diza->map == XDE_MAP_0F &&
             diza->opcode2 == 0xAE && (mpeek >> 6) == 3 && reg <= 4 &&
             diza->p_rep != 0xF3)
+            diza->flag |= C_BAD;
+        // PREFETCHh (0F 18 /0-/3) and PREFETCH/PREFETCHW (0F 0D /0 /1) are
+        // defined only with a memory operand, so their mod=3 encodings are
+        // reserved. The 0F 18 /4-/7 NOPs keep their mod=3 form.
+        if (diza->opcode == 0x0F && diza->map == XDE_MAP_0F &&
+            (mpeek >> 6) == 3 &&
+            ((diza->opcode2 == 0x18 && reg <= 3) ||
+             (diza->opcode2 == 0x0D && reg <= 1)))
             diza->flag |= C_BAD;
         if (diza->opcode == 0xF6 && diza->map == XDE_MAP_LEGACY) {
             if (reg != 2)
