@@ -17,7 +17,8 @@ XA_F64 = 0x00000020
 XA_D64 = 0x00000040
 XA_OPSZ8 = 0x00000080
 XA_UNDEF = 0x00000100
-XA_BAD = 0x00000200
+XA_BAD = 0x00000200   # not a usable encoding in any mode; mode-limited forms
+                      # use XA_I64/XA_O64/XA_F64/XA_D64 instead
 XA_INVALID = 0x00000400
 XA_MOFFS = 0x00000800
 XA_GROUP = 0x00001000
@@ -98,14 +99,14 @@ for base in (0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38):
     m0[base + 4] = IMM_IB | XA_OPSZ8
     m0[base + 5] = IMM_IZ
 
-# PUSH/POP ES/CS/SS/DS
-m0[0x06] = XA_PUSH | XA_I64 | XA_BAD
-m0[0x07] = XA_POP | XA_I64 | XA_BAD
-m0[0x0E] = XA_PUSH | XA_I64 | XA_BAD
-m0[0x16] = XA_PUSH | XA_I64 | XA_BAD
-m0[0x17] = XA_POP | XA_I64 | XA_BAD
-m0[0x1E] = XA_PUSH | XA_I64 | XA_BAD
-m0[0x1F] = XA_POP | XA_I64 | XA_BAD
+# PUSH/POP ES/CS/SS/DS - 64-bit drops these, which XA_I64 already expresses
+m0[0x06] = XA_PUSH | XA_I64
+m0[0x07] = XA_POP | XA_I64
+m0[0x0E] = XA_PUSH | XA_I64
+m0[0x16] = XA_PUSH | XA_I64
+m0[0x17] = XA_POP | XA_I64
+m0[0x1E] = XA_PUSH | XA_I64
+m0[0x1F] = XA_POP | XA_I64
 
 # 0x0F is an escape - decoder consumes it before lookup
 m0[0x0F] = 0
@@ -114,10 +115,10 @@ m0[0x0F] = 0
 for p in (0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF0, 0xF2, 0xF3):
     m0[p] = XA_INVALID
 
-m0[0x27] = XA_I64 | XA_BAD  # DAA
-m0[0x2F] = XA_I64 | XA_BAD  # DAS
-m0[0x37] = XA_I64 | XA_BAD  # AAA
-m0[0x3F] = XA_I64 | XA_BAD  # AAS
+m0[0x27] = XA_I64  # DAA
+m0[0x2F] = XA_I64  # DAS
+m0[0x37] = XA_I64  # AAA
+m0[0x3F] = XA_I64  # AAS
 
 # INC/DEC eAX.. - i64 (REX in 64-bit is consumed as prefix)
 for i in rng(0x40, 0x4F):
@@ -129,30 +130,27 @@ for i in rng(0x50, 0x57):
 for i in rng(0x58, 0x5F):
     m0[i] = XA_POP | XA_D64
 
-m0[0x60] = XA_PUSH | XA_I64 | XA_BAD  # PUSHA
-m0[0x61] = XA_POP | XA_I64 | XA_BAD  # POPA
-m0[0x62] = XA_MODRM | XA_I64 | XA_BAD | XA_UNDEF  # BOUND
+m0[0x60] = XA_PUSH | XA_I64  # PUSHA
+m0[0x61] = XA_POP | XA_I64  # POPA
+m0[0x62] = XA_MODRM | XA_I64 | XA_UNDEF  # BOUND
 m0[0x63] = XA_MODRM  # ARPL / MOVSXD
 
 m0[0x68] = IMM_IZ | XA_PUSH | XA_D64
 m0[0x69] = XA_MODRM | IMM_IZ
 m0[0x6A] = IMM_IB | XA_PUSH | XA_D64
 m0[0x6B] = XA_MODRM | IMM_IB
-m0[0x6C] = XA_BAD  # INS
-m0[0x6D] = XA_BAD
-m0[0x6E] = XA_BAD  # OUTS
-m0[0x6F] = XA_BAD
+m0[0x6C] = 0  # INS
+m0[0x6D] = 0
+m0[0x6E] = 0  # OUTS
+m0[0x6F] = 0
 
+# Jcc reads FL and nothing else is unknown, so no XA_UNDEF here.
 for i in rng(0x70, 0x7F):
-    # Jcc reads FL and nothing else is unknown, so no XA_UNDEF here.
-    fl = IMM_IB | XA_REL | XA_F64 | XA_JCC
-    if i in (0x70, 0x71, 0x7A, 0x7B):
-        fl |= XA_BAD
-    m0[i] = fl
+    m0[i] = IMM_IB | XA_REL | XA_F64 | XA_JCC
 
 m0[0x80] = XA_MODRM | IMM_IB | GRP(XG_1) | XA_OPSZ8
 m0[0x81] = XA_MODRM | IMM_IZ | GRP(XG_1)
-m0[0x82] = XA_MODRM | IMM_IB | GRP(XG_1) | XA_OPSZ8 | XA_I64 | XA_BAD
+m0[0x82] = XA_MODRM | IMM_IB | GRP(XG_1) | XA_OPSZ8 | XA_I64
 m0[0x83] = XA_MODRM | IMM_IB | GRP(XG_1)
 m0[0x84] = XA_MODRM | XA_OPSZ8  # TEST
 m0[0x85] = XA_MODRM
@@ -162,9 +160,9 @@ m0[0x88] = XA_MODRM | XA_OPSZ8  # MOV
 m0[0x89] = XA_MODRM
 m0[0x8A] = XA_MODRM | XA_OPSZ8
 m0[0x8B] = XA_MODRM
-m0[0x8C] = XA_MODRM | XA_BAD  # MOV sreg
+m0[0x8C] = XA_MODRM  # MOV r/m, sreg
 m0[0x8D] = XA_MODRM  # LEA
-m0[0x8E] = XA_MODRM | XA_BAD
+m0[0x8E] = XA_MODRM  # MOV sreg, r/m
 m0[0x8F] = XA_MODRM | XA_POP | XA_D64 | GRP(XG_1A)  # POP Ev / XOP prefix handled earlier
 
 m0[0x90] = 0  # NOP / XCHG
@@ -172,12 +170,12 @@ for i in rng(0x91, 0x97):
     m0[i] = 0
 m0[0x98] = 0  # CBW/CWDE/CDQE
 m0[0x99] = 0  # CWD/CDQ/CQO
-m0[0x9A] = IMM_AP | XA_I64 | XA_BAD | XA_UNDEF | XA_CALL
+m0[0x9A] = IMM_AP | XA_I64 | XA_UNDEF | XA_CALL
 m0[0x9B] = XA_UNDEF  # WAIT
-m0[0x9C] = XA_PUSH | XA_D64 | XA_BAD  # PUSHF
-m0[0x9D] = XA_POP | XA_D64 | XA_BAD  # POPF
-m0[0x9E] = XA_BAD  # SAHF
-m0[0x9F] = XA_BAD  # LAHF
+m0[0x9C] = XA_PUSH | XA_D64  # PUSHF
+m0[0x9D] = XA_POP | XA_D64  # POPF
+m0[0x9E] = 0  # SAHF
+m0[0x9F] = 0  # LAHF
 
 m0[0xA0] = XA_MOFFS | XA_OPSZ8
 m0[0xA1] = XA_MOFFS
@@ -192,9 +190,9 @@ m0[0xA9] = IMM_IZ
 m0[0xAA] = XA_OPSZ8
 m0[0xAB] = 0
 m0[0xAC] = XA_OPSZ8
-m0[0xAD] = XA_BAD
+m0[0xAD] = 0  # LODSD
 m0[0xAE] = XA_OPSZ8
-m0[0xAF] = XA_BAD
+m0[0xAF] = 0  # SCASD
 
 for i in rng(0xB0, 0xB7):
     m0[i] = IMM_IB | XA_OPSZ8
@@ -205,57 +203,57 @@ m0[0xC0] = XA_MODRM | IMM_IB | GRP(XG_2) | XA_OPSZ8
 m0[0xC1] = XA_MODRM | IMM_IB | GRP(XG_2)
 m0[0xC2] = IMM_IW | XA_STOP | XA_RET | XA_UNDEF
 m0[0xC3] = XA_STOP | XA_RET | XA_UNDEF
-m0[0xC4] = XA_MODRM | XA_I64 | XA_BAD  # LES / VEX
-m0[0xC5] = XA_MODRM | XA_I64 | XA_BAD  # LDS / VEX
+m0[0xC4] = XA_MODRM | XA_I64  # LES / VEX
+m0[0xC5] = XA_MODRM | XA_I64  # LDS / VEX
 m0[0xC6] = XA_MODRM | IMM_IB | GRP(XG_11A) | XA_OPSZ8
 m0[0xC7] = XA_MODRM | IMM_IZ | GRP(XG_11B)
 m0[0xC8] = IMM_ENTER
 m0[0xC9] = XA_D64  # LEAVE
-m0[0xCA] = IMM_IW | XA_STOP | XA_RET | XA_BAD | XA_UNDEF
-m0[0xCB] = XA_STOP | XA_RET | XA_BAD | XA_UNDEF
-m0[0xCC] = XA_BAD  # INT3
+m0[0xCA] = IMM_IW | XA_STOP | XA_RET | XA_UNDEF  # RETF imm16
+m0[0xCB] = XA_STOP | XA_RET | XA_UNDEF  # RETF
+m0[0xCC] = 0  # INT3
 m0[0xCD] = IMM_IB | XA_UNDEF
-m0[0xCE] = XA_I64 | XA_BAD | XA_UNDEF  # INTO
-m0[0xCF] = XA_STOP | XA_RET | XA_BAD | XA_UNDEF  # IRET
+m0[0xCE] = XA_I64 | XA_UNDEF  # INTO
+m0[0xCF] = XA_STOP | XA_RET | XA_UNDEF  # IRET
 
 m0[0xD0] = XA_MODRM | GRP(XG_2) | XA_OPSZ8
 m0[0xD1] = XA_MODRM | GRP(XG_2)
 m0[0xD2] = XA_MODRM | GRP(XG_2) | XA_OPSZ8
 m0[0xD3] = XA_MODRM | GRP(XG_2)
-m0[0xD4] = IMM_IB | XA_I64 | XA_BAD  # AAM
-m0[0xD5] = IMM_IB | XA_I64 | XA_BAD  # AAD / REX2 in 64-bit
+m0[0xD4] = IMM_IB | XA_I64  # AAM
+m0[0xD5] = IMM_IB | XA_I64  # AAD / REX2 in 64-bit
 m0[0xD6] = XA_BAD | XA_OPSZ8  # SALC
-m0[0xD7] = XA_BAD | XA_OPSZ8  # XLAT
+m0[0xD7] = XA_OPSZ8  # XLAT
 for i in rng(0xD8, 0xDF):
     m0[i] = XA_MODRM | XA_UNDEF  # x87
 
 # LOOP/LOOPE/LOOPNE/JCXZ: only the counter and (for E0/E1) ZF are involved
 for i in (0xE0, 0xE1):
-    m0[i] = IMM_IB | XA_REL | XA_F64 | XA_BAD
+    m0[i] = IMM_IB | XA_REL | XA_F64
 m0[0xE2] = IMM_IB | XA_REL | XA_F64
 m0[0xE3] = IMM_IB | XA_REL | XA_F64
-m0[0xE4] = IMM_IB | XA_OPSZ8 | XA_BAD
-m0[0xE5] = IMM_IB | XA_BAD
-m0[0xE6] = IMM_IB | XA_OPSZ8 | XA_BAD
-m0[0xE7] = IMM_IB | XA_BAD
+m0[0xE4] = IMM_IB | XA_OPSZ8
+m0[0xE5] = IMM_IB
+m0[0xE6] = IMM_IB | XA_OPSZ8
+m0[0xE7] = IMM_IB
 m0[0xE8] = IMM_IZ | XA_REL | XA_F64 | XA_CALL | XA_UNDEF
 m0[0xE9] = IMM_IZ | XA_REL | XA_F64 | XA_JMP | XA_STOP
-m0[0xEA] = IMM_AP | XA_I64 | XA_JMP | XA_STOP | XA_BAD | XA_UNDEF
+m0[0xEA] = IMM_AP | XA_I64 | XA_JMP | XA_STOP | XA_UNDEF
 m0[0xEB] = IMM_IB | XA_REL | XA_F64 | XA_JMP | XA_STOP
-m0[0xEC] = XA_OPSZ8 | XA_BAD
-m0[0xED] = XA_BAD
-m0[0xEE] = XA_OPSZ8 | XA_BAD
-m0[0xEF] = XA_BAD
+m0[0xEC] = XA_OPSZ8
+m0[0xED] = 0
+m0[0xEE] = XA_OPSZ8
+m0[0xEF] = 0
 
 m0[0xF1] = XA_BAD | XA_UNDEF  # INT1
-m0[0xF4] = XA_BAD  # HLT
-m0[0xF5] = XA_BAD
+m0[0xF4] = 0  # HLT
+m0[0xF5] = 0  # CMC
 m0[0xF6] = XA_MODRM | GRP(XG_3_1) | XA_OPSZ8
 m0[0xF7] = XA_MODRM | GRP(XG_3_2)
 m0[0xF8] = 0
 m0[0xF9] = 0
-m0[0xFA] = XA_BAD
-m0[0xFB] = XA_BAD
+m0[0xFA] = 0  # CLI
+m0[0xFB] = 0  # STI
 m0[0xFC] = 0  # CLD
 m0[0xFD] = 0  # STD
 m0[0xFE] = XA_MODRM | GRP(XG_4) | XA_OPSZ8
@@ -350,10 +348,10 @@ m1[0xAF] = XA_MODRM  # IMUL
 
 m1[0xB0] = XA_MODRM | XA_OPSZ8
 m1[0xB1] = XA_MODRM
-m1[0xB2] = XA_MODRM | XA_BAD
+m1[0xB2] = XA_MODRM  # LSS
 m1[0xB3] = XA_MODRM
-m1[0xB4] = XA_MODRM | XA_BAD
-m1[0xB5] = XA_MODRM | XA_BAD
+m1[0xB4] = XA_MODRM  # LFS
+m1[0xB5] = XA_MODRM  # LGS
 m1[0xB6] = XA_MODRM
 m1[0xB7] = XA_MODRM
 m1[0xB8] = XA_MODRM  # POPCNT / JMPE

@@ -1425,6 +1425,174 @@ int main(void)
         expect_flag("0F 01 undef", 64, smsw, 3, C_UNDEF, 1);
     }
 
+    // XA_BAD means "not a usable encoding in any mode", so the legacy forms
+    // below, legal in 16/32/64-bit alike, must not carry it.
+    {
+        static const uint8_t insb[] = { 0x6C };
+        static const uint8_t insd[] = { 0x6D };
+        static const uint8_t outsb[] = { 0x6E };
+        static const uint8_t outsd[] = { 0x6F };
+        static const uint8_t jo8[] = { 0x70, 0x00 };
+        static const uint8_t jno8[] = { 0x71, 0x00 };
+        static const uint8_t jp8[] = { 0x7A, 0x00 };
+        static const uint8_t jnp8[] = { 0x7B, 0x00 };
+        static const uint8_t mov_r_sreg[] = { 0x8C, 0xC0 };
+        static const uint8_t mov_sreg_r[] = { 0x8E, 0xC0 };
+        static const uint8_t pushf[] = { 0x9C };
+        static const uint8_t popf[] = { 0x9D };
+        static const uint8_t sahf[] = { 0x9E };
+        static const uint8_t lahf[] = { 0x9F };
+        static const uint8_t lodsd[] = { 0xAD };
+        static const uint8_t scasd[] = { 0xAF };
+        static const uint8_t int3[] = { 0xCC };
+        static const uint8_t xlat[] = { 0xD7 };
+        static const uint8_t loopne8[] = { 0xE0, 0x00 };
+        static const uint8_t loope8[] = { 0xE1, 0x00 };
+        static const uint8_t in_al_ib[] = { 0xE4, 0x00 };
+        static const uint8_t in_eax_ib[] = { 0xE5, 0x00 };
+        static const uint8_t out_ib_al[] = { 0xE6, 0x00 };
+        static const uint8_t out_ib_eax[] = { 0xE7, 0x00 };
+        static const uint8_t in_al_dx[] = { 0xEC };
+        static const uint8_t in_eax_dx[] = { 0xED };
+        static const uint8_t out_dx_al[] = { 0xEE };
+        static const uint8_t out_dx_eax[] = { 0xEF };
+        static const uint8_t hlt[] = { 0xF4 };
+        static const uint8_t cmc[] = { 0xF5 };
+        static const uint8_t cli[] = { 0xFA };
+        static const uint8_t sti[] = { 0xFB };
+        static const uint8_t retf_ib[] = { 0xCA, 0x00, 0x00 };
+        static const uint8_t retf[] = { 0xCB };
+        static const uint8_t iret[] = { 0xCF };
+        expect_flag("insb not bad", 64, insb, 1, C_BAD, 0);
+        expect_flag("insd not bad", 64, insd, 1, C_BAD, 0);
+        expect_flag("outsb not bad", 64, outsb, 1, C_BAD, 0);
+        expect_flag("outsd not bad", 64, outsd, 1, C_BAD, 0);
+        expect_flag("jo rel8 not bad", 64, jo8, 2, C_BAD, 0);
+        expect_flag("jno rel8 not bad", 64, jno8, 2, C_BAD, 0);
+        expect_flag("jp rel8 not bad", 64, jp8, 2, C_BAD, 0);
+        expect_flag("jnp rel8 not bad", 64, jnp8, 2, C_BAD, 0);
+        expect_flag("mov eax,sreg not bad", 64, mov_r_sreg, 2, C_BAD, 0);
+        expect_flag("mov sreg,eax not bad", 64, mov_sreg_r, 2, C_BAD, 0);
+        expect_flag("pushf not bad", 64, pushf, 1, C_BAD, 0);
+        expect_flag("popf not bad", 64, popf, 1, C_BAD, 0);
+        expect_flag("sahf not bad", 64, sahf, 1, C_BAD, 0);
+        expect_flag("lahf not bad", 64, lahf, 1, C_BAD, 0);
+        expect_flag("lodsd not bad", 64, lodsd, 1, C_BAD, 0);
+        expect_flag("scasd not bad", 64, scasd, 1, C_BAD, 0);
+        expect_flag("int3 not bad", 64, int3, 1, C_BAD, 0);
+        expect_flag("xlat not bad", 64, xlat, 1, C_BAD, 0);
+        expect_flag("loopne rel8 not bad", 64, loopne8, 2, C_BAD, 0);
+        expect_flag("loope rel8 not bad", 64, loope8, 2, C_BAD, 0);
+        expect_flag("in al,imm8 not bad", 64, in_al_ib, 2, C_BAD, 0);
+        expect_flag("in eax,imm8 not bad", 64, in_eax_ib, 2, C_BAD, 0);
+        expect_flag("out imm8,al not bad", 64, out_ib_al, 2, C_BAD, 0);
+        expect_flag("out imm8,eax not bad", 64, out_ib_eax, 2, C_BAD, 0);
+        expect_flag("in al,dx not bad", 64, in_al_dx, 1, C_BAD, 0);
+        expect_flag("in eax,dx not bad", 64, in_eax_dx, 1, C_BAD, 0);
+        expect_flag("out dx,al not bad", 64, out_dx_al, 1, C_BAD, 0);
+        expect_flag("out dx,eax not bad", 64, out_dx_eax, 1, C_BAD, 0);
+        expect_flag("hlt not bad", 64, hlt, 1, C_BAD, 0);
+        expect_flag("cmc not bad", 64, cmc, 1, C_BAD, 0);
+        expect_flag("cli not bad", 64, cli, 1, C_BAD, 0);
+        expect_flag("sti not bad", 64, sti, 1, C_BAD, 0);
+        expect_flag("retf imm16 not bad", 64, retf_ib, 3, C_BAD, 0);
+        expect_flag("retf not bad", 64, retf, 1, C_BAD, 0);
+        expect_flag("iret not bad", 64, iret, 1, C_BAD, 0);
+    }
+    {
+        // LSS/LFS/LGS are plain ModRM instructions in every mode.
+        static const uint8_t lss[] = { 0x0F, 0xB2, 0x00 };
+        static const uint8_t lfs[] = { 0x0F, 0xB4, 0x00 };
+        static const uint8_t lgs[] = { 0x0F, 0xB5, 0x00 };
+        expect_flag("lss eax,[rax] not bad", 64, lss, 3, C_BAD, 0);
+        expect_flag("lfs eax,[rax] not bad", 64, lfs, 3, C_BAD, 0);
+        expect_flag("lgs eax,[rax] not bad", 64, lgs, 3, C_BAD, 0);
+    }
+    {
+        // XA_I64 marks the 16/32-bit-only forms: they stay legal there
+        // (C_BAD clear, C_I64 set) and the decoder still rejects them in
+        // 64-bit through XA_I64, not through XA_BAD.
+        static const uint8_t push_es[] = { 0x06 };
+        static const uint8_t pop_es[] = { 0x07 };
+        static const uint8_t push_cs[] = { 0x0E };
+        static const uint8_t push_ss[] = { 0x16 };
+        static const uint8_t pop_ss[] = { 0x17 };
+        static const uint8_t push_ds[] = { 0x1E };
+        static const uint8_t pop_ds[] = { 0x1F };
+        static const uint8_t daa[] = { 0x27 };
+        static const uint8_t das[] = { 0x2F };
+        static const uint8_t aaa[] = { 0x37 };
+        static const uint8_t aas[] = { 0x3F };
+        static const uint8_t pusha[] = { 0x60 };
+        static const uint8_t popa[] = { 0x61 };
+        static const uint8_t bound[] = { 0x62, 0x00 };
+        static const uint8_t grp1_82[] = { 0x82, 0xC0, 0x00 };
+        static const uint8_t callf[] = { 0x9A, 0, 0, 0, 0, 0, 0 };
+        static const uint8_t les[] = { 0xC4, 0x00 };
+        static const uint8_t lds[] = { 0xC5, 0x00 };
+        static const uint8_t into[] = { 0xCE };
+        static const uint8_t aam[] = { 0xD4, 0x0A };
+        static const uint8_t aad[] = { 0xD5, 0x0A };
+        static const uint8_t jmpf[] = { 0xEA, 0, 0, 0, 0, 0, 0 };
+        expect_flag("push es (32) not bad", 32, push_es, 1, C_BAD, 0);
+        expect_flag("push es (32) C_I64", 32, push_es, 1, C_I64, 1);
+        expect_flag("pop es (32) not bad", 32, pop_es, 1, C_BAD, 0);
+        expect_flag("push cs (32) not bad", 32, push_cs, 1, C_BAD, 0);
+        expect_flag("push cs (16) not bad", 16, push_cs, 1, C_BAD, 0);
+        expect_flag("push cs (16) C_I64", 16, push_cs, 1, C_I64, 1);
+        expect_flag("push ss (32) not bad", 32, push_ss, 1, C_BAD, 0);
+        expect_flag("pop ss (32) not bad", 32, pop_ss, 1, C_BAD, 0);
+        expect_flag("push ds (32) not bad", 32, push_ds, 1, C_BAD, 0);
+        expect_flag("pop ds (32) not bad", 32, pop_ds, 1, C_BAD, 0);
+        expect_flag("daa (32) not bad", 32, daa, 1, C_BAD, 0);
+        expect_flag("daa (32) C_I64", 32, daa, 1, C_I64, 1);
+        expect_flag("das (32) not bad", 32, das, 1, C_BAD, 0);
+        expect_flag("aaa (32) not bad", 32, aaa, 1, C_BAD, 0);
+        expect_flag("aaa (32) C_I64", 32, aaa, 1, C_I64, 1);
+        expect_flag("aaa (16) not bad", 16, aaa, 1, C_BAD, 0);
+        expect_flag("aas (32) not bad", 32, aas, 1, C_BAD, 0);
+        expect_flag("pusha (32) not bad", 32, pusha, 1, C_BAD, 0);
+        expect_flag("pusha (32) C_I64", 32, pusha, 1, C_I64, 1);
+        expect_flag("popa (32) not bad", 32, popa, 1, C_BAD, 0);
+        expect_flag("bound (32) not bad", 32, bound, 2, C_BAD, 0);
+        expect_flag("bound (32) C_I64", 32, bound, 2, C_I64, 1);
+        expect_flag("82 /0 (32) not bad", 32, grp1_82, 3, C_BAD, 0);
+        expect_flag("call far (32) not bad", 32, callf, 7, C_BAD, 0);
+        expect_flag("les (32) not bad", 32, les, 2, C_BAD, 0);
+        expect_flag("les (32) C_I64", 32, les, 2, C_I64, 1);
+        expect_flag("lds (32) not bad", 32, lds, 2, C_BAD, 0);
+        expect_flag("into (32) not bad", 32, into, 1, C_BAD, 0);
+        expect_flag("aam (32) not bad", 32, aam, 2, C_BAD, 0);
+        expect_flag("aad (32) not bad", 32, aad, 2, C_BAD, 0);
+        expect_flag("jmp far (32) not bad", 32, jmpf, 7, C_BAD, 0);
+        expect_fail("push es invalid in 64", 64, push_es, 1);
+        expect_fail("pop es invalid in 64", 64, pop_es, 1);
+        expect_fail("push cs invalid in 64", 64, push_cs, 1);
+        expect_fail("push ss invalid in 64", 64, push_ss, 1);
+        expect_fail("pop ss invalid in 64", 64, pop_ss, 1);
+        expect_fail("push ds invalid in 64", 64, push_ds, 1);
+        expect_fail("pop ds invalid in 64", 64, pop_ds, 1);
+        expect_fail("daa invalid in 64", 64, daa, 1);
+        expect_fail("das invalid in 64", 64, das, 1);
+        expect_fail("aas invalid in 64", 64, aas, 1);
+        expect_fail("pusha invalid in 64", 64, pusha, 1);
+        expect_fail("popa invalid in 64", 64, popa, 1);
+        expect_fail("bound invalid in 64", 64, bound, 2);
+        expect_fail("82 /0 invalid in 64", 64, grp1_82, 3);
+        expect_fail("call far invalid in 64", 64, callf, 7);
+        expect_fail("into invalid in 64", 64, into, 1);
+        expect_fail("aam invalid in 64", 64, aam, 2);
+        expect_fail("aad invalid in 64", 64, aad, 2);
+        expect_fail("jmp far invalid in 64", 64, jmpf, 7);
+    }
+    {
+        // Still-illegal group entries keep C_BAD.
+        static const uint8_t grp5_7[] = { 0xFF, 0xF8 };
+        static const uint8_t ud1[] = { 0x0F, 0xB9, 0x00 };
+        expect_flag("FF /7 still bad", 64, grp5_7, 2, C_BAD, 1);
+        expect_flag("0F B9 UD1 still bad", 64, ud1, 3, C_BAD, 1);
+    }
+
     // 16-bit
     {
         static const uint8_t add16[] = { 0x01, 0xC0 };
