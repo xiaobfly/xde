@@ -1234,6 +1234,31 @@ int main(void)
         expect_set("wrgsbase src RAX", 64, wrgsbase, 4, 0, XSET_RAX, 1);
         expect_set("wrgsbase (no src other)", 64, wrgsbase, 4, 0, XSET_OTHER, 0);
         expect_set("wrgsbase dst other", 64, wrgsbase, 4, 1, XSET_OTHER, 1);
+        // 0F AE keeps the memory form's encoding at mod=3, where only /5 /6 /7
+        // (and the F3-prefixed /0-/3 above) exist; the other sub-forms are
+        // invalid encodings and must be flagged, but /5-/7, the FS/GS moves,
+        // the CET INCSSP form and the memory forms must not be.
+        static const uint8_t ae_bad0[] = { 0x0F, 0xAE, 0xC0 };
+        static const uint8_t ae_bad1[] = { 0x0F, 0xAE, 0xC8 };
+        static const uint8_t ae_bad2[] = { 0x0F, 0xAE, 0xD0 };
+        static const uint8_t ae_bad3[] = { 0x0F, 0xAE, 0xD8 };
+        static const uint8_t ae_bad4[] = { 0x0F, 0xAE, 0xE0 };
+        static const uint8_t incsspd[] = { 0xF3, 0x0F, 0xAE, 0xE8 };
+        static const uint8_t fxsave_m[] = { 0x0F, 0xAE, 0x00 };
+        expect_flag("0F AE /0 m3 bad", 64, ae_bad0, 3, C_BAD, 1);
+        expect_flag("0F AE /1 m3 bad", 64, ae_bad1, 3, C_BAD, 1);
+        expect_flag("0F AE /2 m3 bad", 64, ae_bad2, 3, C_BAD, 1);
+        expect_flag("0F AE /3 m3 bad", 64, ae_bad3, 3, C_BAD, 1);
+        expect_flag("0F AE /4 m3 bad", 64, ae_bad4, 3, C_BAD, 1);
+        expect_flag("lfence not bad", 64, lfence, 3, C_BAD, 0);
+        expect_flag("mfence not bad", 64, mfence, 3, C_BAD, 0);
+        expect_flag("sfence not bad", 64, sfence, 3, C_BAD, 0);
+        expect_flag("rdfsbase not bad", 64, rdfsbase, 4, C_BAD, 0);
+        expect_flag("rdgsbase not bad", 64, rdgsbase, 4, C_BAD, 0);
+        expect_flag("wrfsbase not bad", 64, wrfsbase, 4, C_BAD, 0);
+        expect_flag("wrgsbase not bad", 64, wrgsbase, 4, C_BAD, 0);
+        expect_flag("incsspd not bad", 64, incsspd, 4, C_BAD, 0);
+        expect_flag("fxsave mem not bad", 64, fxsave_m, 3, C_BAD, 0);
     }
     {
         // Memory forms that store into their r/m operand, plus the read-only
@@ -1248,6 +1273,7 @@ int main(void)
         static const uint8_t xrstors[] = { 0x0F, 0xC7, 0x18 };
         static const uint8_t xsavec[] = { 0x0F, 0xC7, 0x20 };
         static const uint8_t xsaves[] = { 0x0F, 0xC7, 0x28 };
+        static const uint8_t vmptrst[] = { 0x0F, 0xC7, 0x38 };
         expect_set("fxsave dst M", 64, fxsave, 3, 1, XSET_MEM, 1);
         expect_set("fxsave src M", 64, fxsave, 3, 0, XSET_MEM, 1);
         expect_set("stmxcsr dst M", 64, stmxcsr, 3, 1, XSET_MEM, 1);
@@ -1260,17 +1286,19 @@ int main(void)
         expect_set("xrstors dst M", 64, xrstors, 3, 1, XSET_MEM, 1);
         expect_set("xsavec dst M", 64, xsavec, 3, 1, XSET_MEM, 1);
         expect_set("xsaves dst M", 64, xsaves, 3, 1, XSET_MEM, 1);
+        expect_set("vmptrst dst M", 64, vmptrst, 3, 1, XSET_MEM, 1);
+        expect_set("vmptrst src M", 64, vmptrst, 3, 0, XSET_MEM, 1);
+        expect_set("vmptrst dst other", 64, vmptrst, 3, 1, XSET_OTHER, 1);
         {
             static const uint8_t fxrstor[] = { 0x0F, 0xAE, 0x08 };
             static const uint8_t ldmxcsr[] = { 0x0F, 0xAE, 0x10 };
             static const uint8_t xrstor[] = { 0x0F, 0xAE, 0x28 };
             static const uint8_t vmptrld[] = { 0x0F, 0xC7, 0x30 };
-            static const uint8_t vmptrst[] = { 0x0F, 0xC7, 0x38 };
             expect_set("fxrstor (no dst M)", 64, fxrstor, 3, 1, XSET_MEM, 0);
             expect_set("ldmxcsr (no dst M)", 64, ldmxcsr, 3, 1, XSET_MEM, 0);
             expect_set("xrstor (no dst M)", 64, xrstor, 3, 1, XSET_MEM, 0);
+            expect_set("vmptrld src M", 64, vmptrld, 3, 0, XSET_MEM, 1);
             expect_set("vmptrld (no dst M)", 64, vmptrld, 3, 1, XSET_MEM, 0);
-            expect_set("vmptrst (no dst M)", 64, vmptrst, 3, 1, XSET_MEM, 0);
         }
     }
     {
@@ -1282,6 +1310,7 @@ int main(void)
         static const uint8_t prefetcht2[] = { 0x0F, 0x18, 0x18 };
         static const uint8_t nop18_4[] = { 0x0F, 0x18, 0x20 };
         static const uint8_t prefetchw[] = { 0x0F, 0x0D, 0x00 };
+        static const uint8_t prefetchwt1[] = { 0x0F, 0x0D, 0x08 };
         static const uint8_t nop19[] = { 0x0F, 0x19, 0x00 };
         static const uint8_t nop1d[] = { 0x0F, 0x1D, 0x00 };
         static const uint8_t nop1f[] = { 0x0F, 0x1F, 0x00 };
@@ -1294,6 +1323,9 @@ int main(void)
         expect_set("prefetcht2 (no src other)", 64, prefetcht2, 3, 0, XSET_OTHER, 0);
         expect_set("prefetchw src M", 64, prefetchw, 3, 0, XSET_MEM, 1);
         expect_set("prefetchw (no src other)", 64, prefetchw, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetchwt1 src M", 64, prefetchwt1, 3, 0, XSET_MEM, 1);
+        expect_set("prefetchwt1 (no src other)", 64, prefetchwt1, 3, 0, XSET_OTHER, 0);
+        expect_set("prefetchwt1 (no dst other)", 64, prefetchwt1, 3, 1, XSET_OTHER, 0);
         expect_set("nop Ev (no src M)", 64, nop1f, 3, 0, XSET_MEM, 0);
         expect_set("nop Ev (no src other)", 64, nop1f, 3, 0, XSET_OTHER, 0);
         expect_set("nop Ev (no dst other)", 64, nop1f, 3, 1, XSET_OTHER, 0);
@@ -1307,6 +1339,27 @@ int main(void)
         expect_set("0F 18 /4 nop (no dst other)", 64, nop18_4, 3, 1, XSET_OTHER, 0);
         expect_set("endbr64 (no src other)", 64, endbr64, 4, 0, XSET_OTHER, 0);
         expect_set("endbr64 (no dst other)", 64, endbr64, 4, 1, XSET_OTHER, 0);
+    }
+    {
+        // 0F 1E without a prefix is NOP Ev, the same class as 0F 1F: neither
+        // the r/m register nor the memory operand is accessed. With F3 the
+        // same opcode carries ENDBR64/32 (/7) and RDSSPD/RDSSPQ (/0).
+        static const uint8_t nop1e_m[] = { 0x0F, 0x1E, 0x00 };
+        static const uint8_t nop1e_m4[] = { 0x0F, 0x1E, 0x20 };
+        static const uint8_t nop1e[] = { 0x0F, 0x1E, 0xC0 };
+        static const uint8_t rdsspd[] = { 0xF3, 0x0F, 0x1E, 0xC0 };
+        static const uint8_t rdsspq[] = { 0xF3, 0x48, 0x0F, 0x1E, 0xC0 };
+        expect_set("0F 1E nop (no src M)", 64, nop1e_m, 3, 0, XSET_MEM, 0);
+        expect_set("0F 1E nop (no src other)", 64, nop1e_m, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 1E nop (no dst other)", 64, nop1e_m, 3, 1, XSET_OTHER, 0);
+        expect_set("0F 1E /4 nop (no src other)", 64, nop1e_m4, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 1E nop Ev (no src other)", 64, nop1e, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 1E nop Ev (no dst other)", 64, nop1e, 3, 1, XSET_OTHER, 0);
+        expect_set("rdsspd src other", 64, rdsspd, 4, 0, XSET_OTHER, 1);
+        expect_set("rdsspd dst RAX", 64, rdsspd, 4, 1, XSET_RAX, 1);
+        expect_set("rdsspd (no dst other)", 64, rdsspd, 4, 1, XSET_OTHER, 0);
+        expect_set("rdsspq dst RAX", 64, rdsspq, 5, 1, XSET_RAX, 1);
+        expect_set("rdsspq (no dst other)", 64, rdsspq, 5, 1, XSET_OTHER, 0);
     }
     {
         // 0F B2/B4/B5 LSS/LFS/LGS write a GPR and read a segment + memory.

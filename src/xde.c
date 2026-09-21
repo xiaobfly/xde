@@ -350,31 +350,42 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // F3 0F 1E FA/FB is ENDBR64/ENDBR32: no operands at all.
     int endbr = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                  c2 == 0x1E && mod == 3 && reg == 7 && diza->p_rep == 0xF3);
+    // 0F 1E with no rep prefix is NOP Ev, the same class as 0F 1F: neither
+    // the r/m register nor the memory operand is accessed. Its F3-prefixed
+    // forms are ENDBR64/32 and RDSSPD/RDSSPQ, whose r/m is a plain GPR that
+    // receives the shadow stack pointer.
+    int nop1e = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                 c2 == 0x1E && diza->p_rep == 0);
+    int rdssp = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                 c2 == 0x1E && mod == 3 && reg == 0 && diza->p_rep == 0xF3);
     // 0F 18 /4-/7, 0F 19, 0F 1D and 0F 1F are NOPs: their r/m operand is not
     // accessed (parse_modrm still records the address registers). 0F 18 /0-/3
-    // (PREFETCHNTA/PREFETCHT0/T1/T2) and 0F 0D /0 (PREFETCHW) do read memory
-    // but name no register operand either.
+    // (PREFETCHNTA/PREFETCHT0/T1/T2) and 0F 0D /0 /1 (PREFETCHW, PREFETCHWT1)
+    // do read memory but name no register operand either.
     int nop_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                   mod != 3 &&
                   (c2 == 0x19 || c2 == 0x1D || c2 == 0x1F ||
                    (c2 == 0x18 && reg >= 4)));
     int prefetch_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                        mod != 3 &&
-                       ((c2 == 0x18 && reg <= 3) || (c2 == 0x0D && reg == 0)));
+                       ((c2 == 0x18 && reg <= 3) ||
+                        (c2 == 0x0D && (reg == 0 || reg == 1))));
     // Memory forms that store into their r/m operand: 0F AE /0 /3 /4 /6
     // (FXSAVE, STMXCSR, XSAVE, XSAVEOPT, and CLWB which is /6 with a 66
-    // prefix) and 0F C7 /1 /3 /4 /5 (CMPXCHG8B/16B, XRSTORS, XSAVEC,
-    // XSAVES). Their read-only siblings FXRSTOR /1, LDMXCSR /2, XRSTOR /5,
-    // VMPTRLD /6 and VMPTRST /7 stay source-only.
+    // prefix) and 0F C7 /1 /3 /4 /5 /7 (CMPXCHG8B/16B, XRSTORS, XSAVEC,
+    // XSAVES, VMPTRST, which writes the VMCS pointer to memory). Their
+    // read-only siblings FXRSTOR /1, LDMXCSR /2, XRSTOR /5 and VMPTRLD /6
+    // stay source-only.
     int mem_store = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                      mod != 3 &&
                      ((c2 == 0xAE &&
                        (reg == 0 || reg == 3 || reg == 4 || reg == 6)) ||
                       (c2 == 0xC7 &&
-                       (reg == 1 || reg == 3 || reg == 4 || reg == 5))));
+                       (reg == 1 || reg == 3 || reg == 4 || reg == 5 ||
+                        reg == 7))));
     // Forms whose reg field is not a register operand at all.
-    int reg_not_dst = rdrand || fence || fsgsbase || endbr || nop_ea ||
-                      prefetch_ea;
+    int reg_not_dst = rdrand || fence || fsgsbase || endbr || nop1e ||
+                      nop_ea || prefetch_ea || rdssp;
 
     // 32-bit GP writes zero-extend in 64-bit mode.
     if (diza->mode == 64 && dsz == 4)
@@ -476,8 +487,14 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                 diza->src_set2 |= rset2;
                 diza->dst_set |= XSET_OTHER;
             }
-        } else if (fence || endbr) {
-            // LFENCE/MFENCE/SFENCE and ENDBR64/ENDBR32 take no operand.
+        } else if (fence || endbr || nop1e) {
+            // LFENCE/MFENCE/SFENCE, ENDBR64/ENDBR32 and 0F 1E's NOP Ev take
+            // no operand.
+        } else if (rdssp) {
+            // RDSSPD/RDSSPQ read the shadow stack pointer into r/m.
+            diza->src_set |= XSET_OTHER;
+            diza->dst_set |= rset;
+            diza->dst_set2 |= rset2;
         } else {
             // MOV store forms (88/89, C6/C7) and SETcc only write their r/m
             // operand, so it must not land in src_set; other forms read it.
@@ -505,7 +522,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
             diza->src_set2 |= m2;
         }
     } else {
-        if (!setcc && c != 0x8D && !nop_ea && !prefetch_ea) {
+        if (!setcc && c != 0x8D && !nop_ea && !nop1e && !prefetch_ea) {
             diza->src_set |= XSET_OTHER; // segment override
             diza->src_set |= XSET_MEM;
         }
@@ -1079,6 +1096,14 @@ got_opcode:
         // this point as a legacy opcode.
         if ((diza->opcode == 0xC6 || diza->opcode == 0xC7 || diza->opcode == 0x8F) &&
             diza->map == XDE_MAP_LEGACY && reg != 0 && mpeek != 0xF8)
+            diza->flag |= C_BAD;
+        // 0F AE only defines LFENCE /5, MFENCE /6 and SFENCE /7 at mod=3,
+        // plus the F3-prefixed FS/GS base moves /0-/3. The rest of the group
+        // keeps the memory form's encoding, where reg is an opcode selector
+        // and mod=3 is therefore not an encoding of anything.
+        if (diza->opcode == 0x0F && diza->map == XDE_MAP_0F &&
+            diza->opcode2 == 0xAE && (mpeek >> 6) == 3 && reg <= 4 &&
+            diza->p_rep != 0xF3)
             diza->flag |= C_BAD;
         if (diza->opcode == 0xF6 && diza->map == XDE_MAP_LEGACY) {
             if (reg != 2)
