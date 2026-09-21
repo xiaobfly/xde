@@ -1677,6 +1677,210 @@ int main(void)
         expect_flag("0F 18 /4 m3 nop not bad", 64, nop18_4r, 3, C_BAD, 0);
     }
     {
+        // LEA names its second operand as a memory address, so a mod=3
+        // ModR/M byte is not an encoding of it in any mode. The opcode sits
+        // in the legacy map, which the REX2 prefix keeps, so one rule covers
+        // both encodings. The memory form stays legal everywhere.
+        static const uint8_t lea_r32[]   = { 0x8D, 0xC0 };          // lea eax,eax
+        static const uint8_t lea_r32b[]  = { 0x8D, 0xFF };          // /7 rm7
+        static const uint8_t lea_r64[]   = { 0x48, 0x8D, 0xC0 };
+        static const uint8_t lea_r2[]    = { 0xD5, 0x40, 0x8D, 0xC0 };
+        static const uint8_t lea_m32[]   = { 0x8D, 0x00 };          // lea eax,[eax]
+        static const uint8_t lea_m64[]   = { 0x48, 0x8D, 0x00 };
+        expect_flag("8D C0 m3 bad (64)", 64, lea_r32, 2, C_BAD, 1);
+        expect_flag("8D C0 m3 bad (32)", 32, lea_r32, 2, C_BAD, 1);
+        expect_flag("8D C0 m3 bad (16)", 16, lea_r32, 2, C_BAD, 1);
+        expect_flag("8D FF m3 bad (32)", 32, lea_r32b, 2, C_BAD, 1);
+        expect_flag("48 8D C0 m3 bad (64)", 64, lea_r64, 3, C_BAD, 1);
+        expect_flag("rex2 8D C0 m3 bad (64)", 64, lea_r2, 4, C_BAD, 1);
+        expect_flag("lea [eax] not bad (64)", 64, lea_m32, 2, C_BAD, 0);
+        expect_flag("lea [eax] not bad (32)", 32, lea_m32, 2, C_BAD, 0);
+        expect_flag("lea [eax] not bad (16)", 16, lea_m32, 2, C_BAD, 0);
+        expect_flag("48 8D 00 not bad (64)", 64, lea_m64, 3, C_BAD, 0);
+
+        // MOVLPS / MOVHPS / MOVNTPS store to memory only, so their mod=3
+        // ModR/M bytes name no instruction. The 66-prefixed doubles and the
+        // REX2 encoding keep the same r/m, and the memory forms stay legal in
+        // every mode.
+        static const uint8_t movlps_r[]  = { 0x0F, 0x13, 0xC0 };
+        static const uint8_t movlps_m[]  = { 0x0F, 0x13, 0x00 };
+        static const uint8_t movlpd_r[]  = { 0x66, 0x0F, 0x13, 0xC0 };
+        static const uint8_t movlpd_m[]  = { 0x66, 0x0F, 0x13, 0x00 };
+        static const uint8_t movlps_r2[] = { 0xD5, 0x80, 0x13, 0xC0 };
+        static const uint8_t movhps_r[]  = { 0x0F, 0x17, 0xC0 };
+        static const uint8_t movhps_m[]  = { 0x0F, 0x17, 0x00 };
+        static const uint8_t movntps_r[] = { 0x0F, 0x2B, 0xC0 };
+        static const uint8_t movntps_m[] = { 0x0F, 0x2B, 0x00 };
+        expect_flag("0F 13 /r m3 bad (64)", 64, movlps_r, 3, C_BAD, 1);
+        expect_flag("0F 13 /r m3 bad (32)", 32, movlps_r, 3, C_BAD, 1);
+        expect_flag("0F 13 /r m3 bad (16)", 16, movlps_r, 3, C_BAD, 1);
+        expect_flag("66 0F 13 /r m3 bad (64)", 64, movlpd_r, 4, C_BAD, 1);
+        expect_flag("rex2 0F 13 /r m3 bad (64)", 64, movlps_r2, 4, C_BAD, 1);
+        expect_flag("0F 17 /r m3 bad (64)", 64, movhps_r, 3, C_BAD, 1);
+        expect_flag("0F 17 /r m3 bad (32)", 32, movhps_r, 3, C_BAD, 1);
+        expect_flag("0F 17 /r m3 bad (16)", 16, movhps_r, 3, C_BAD, 1);
+        expect_flag("0F 2B /r m3 bad (64)", 64, movntps_r, 3, C_BAD, 1);
+        expect_flag("0F 2B /r m3 bad (32)", 32, movntps_r, 3, C_BAD, 1);
+        expect_flag("0F 2B /r m3 bad (16)", 16, movntps_r, 3, C_BAD, 1);
+        expect_flag("movlps m64 not bad (64)", 64, movlps_m, 3, C_BAD, 0);
+        expect_flag("movlps m64 not bad (32)", 32, movlps_m, 3, C_BAD, 0);
+        expect_flag("66 movlpd m64 not bad (64)", 64, movlpd_m, 4, C_BAD, 0);
+        expect_flag("movhps m64 not bad (64)", 64, movhps_m, 3, C_BAD, 0);
+        expect_flag("movntps m128 not bad (64)", 64, movntps_m, 3, C_BAD, 0);
+
+        // MOVMSKPS / MOVMSKPD read their xmm source from a register, so the
+        // r/m must be mod=3 and any other mod is not an encoding of them.
+        static const uint8_t movmskps_r[] = { 0x0F, 0x50, 0xC0 };
+        static const uint8_t movmskps_m[] = { 0x0F, 0x50, 0x00 };
+        static const uint8_t movmskps_m7[] = { 0x0F, 0x50, 0x3F };
+        static const uint8_t movmskpd_r[] = { 0x66, 0x0F, 0x50, 0xC0 };
+        static const uint8_t movmskpd_m[] = { 0x66, 0x0F, 0x50, 0x00 };
+        expect_flag("0F 50 m0 bad (64)", 64, movmskps_m, 3, C_BAD, 1);
+        expect_flag("0F 50 m0 bad (32)", 32, movmskps_m, 3, C_BAD, 1);
+        expect_flag("0F 50 m0 bad (16)", 16, movmskps_m, 3, C_BAD, 1);
+        expect_flag("0F 50 /7 m0 bad (64)", 64, movmskps_m7, 3, C_BAD, 1);
+        expect_flag("66 0F 50 m0 bad (64)", 64, movmskpd_m, 4, C_BAD, 1);
+        expect_flag("movmskps r32 not bad (64)", 64, movmskps_r, 3, C_BAD, 0);
+        expect_flag("movmskps r32 not bad (32)", 32, movmskps_r, 3, C_BAD, 0);
+        expect_flag("movmskps r32 not bad (16)", 16, movmskps_r, 3, C_BAD, 0);
+        expect_flag("movmskpd r32 not bad (64)", 64, movmskpd_r, 4, C_BAD, 0);
+    }
+    {
+        // The same mod rule covers every other opcode whose r/m the SDM
+        // fixes to memory or to a register. 66 0F 12 / 0F 16 are the
+        // memory-only MOVLPD/MOVHPD pair; without the 66 and with F3/F2 the
+        // same opcodes have register forms (MOVHLPS/MOVLHPS, MOVSLDUP/
+        // MOVSHDUP, MOVDDUP), so only that one prefix combination is marked.
+        static const uint8_t movlpd_r[]  = { 0x66, 0x0F, 0x12, 0xC0 };
+        static const uint8_t movlpd_m[]  = { 0x66, 0x0F, 0x12, 0x00 };
+        static const uint8_t movhpd_r[]  = { 0x66, 0x0F, 0x16, 0xC0 };
+        static const uint8_t movhpd_m[]  = { 0x66, 0x0F, 0x16, 0x00 };
+        static const uint8_t movhlps[]   = { 0x0F, 0x12, 0xC0 };
+        static const uint8_t movlhps[]   = { 0x0F, 0x16, 0xC0 };
+        static const uint8_t movsldup[]  = { 0xF3, 0x0F, 0x12, 0xC0 };
+        static const uint8_t movshdup[]  = { 0xF3, 0x0F, 0x16, 0xC0 };
+        static const uint8_t movddup[]   = { 0xF2, 0x0F, 0x12, 0xC0 };
+        expect_flag("66 0F 12 /r m3 bad (64)", 64, movlpd_r, 4, C_BAD, 1);
+        expect_flag("66 0F 12 /r m3 bad (32)", 32, movlpd_r, 4, C_BAD, 1);
+        expect_flag("66 0F 12 /r m3 bad (16)", 16, movlpd_r, 4, C_BAD, 1);
+        expect_flag("66 0F 16 /r m3 bad (64)", 64, movhpd_r, 4, C_BAD, 1);
+        expect_flag("66 movlpd m64 not bad (64)", 64, movlpd_m, 4, C_BAD, 0);
+        expect_flag("66 movhpd m64 not bad (64)", 64, movhpd_m, 4, C_BAD, 0);
+        expect_flag("movhlps not bad (64)", 64, movhlps, 3, C_BAD, 0);
+        expect_flag("movlhps not bad (64)", 64, movlhps, 3, C_BAD, 0);
+        expect_flag("movsldup not bad (64)", 64, movsldup, 4, C_BAD, 0);
+        expect_flag("movshdup not bad (64)", 64, movshdup, 4, C_BAD, 0);
+        expect_flag("movddup not bad (64)", 64, movddup, 4, C_BAD, 0);
+
+        // LSS/LFS/LGS read a far pointer from memory, MOVNTI and the MOVNTQ/
+        // MOVNTDQ pair store to memory, and LDDQU is the F2-prefixed m128
+        // load: all of them name a memory r/m in every prefix combination.
+        static const uint8_t lss_r[]     = { 0x0F, 0xB2, 0xC0 };
+        static const uint8_t lss16_r[]   = { 0x66, 0x0F, 0xB2, 0xC0 };
+        static const uint8_t lss_m[]     = { 0x0F, 0xB2, 0x00 };
+        static const uint8_t lfs_r[]     = { 0x0F, 0xB4, 0xC0 };
+        static const uint8_t lgs_r[]     = { 0x0F, 0xB5, 0xC0 };
+        static const uint8_t movnti_r[]  = { 0x0F, 0xC3, 0xC0 };
+        static const uint8_t movntq_r[]  = { 0x0F, 0xE7, 0xC0 };
+        static const uint8_t movntdq_r[] = { 0x66, 0x0F, 0xE7, 0xC0 };
+        static const uint8_t lddqu_r[]   = { 0xF2, 0x0F, 0xF0, 0xC0 };
+        static const uint8_t lddqu_m[]   = { 0xF2, 0x0F, 0xF0, 0x00 };
+        expect_flag("0F B2 m3 bad (64)", 64, lss_r, 3, C_BAD, 1);
+        expect_flag("0F B2 m3 bad (32)", 32, lss_r, 3, C_BAD, 1);
+        expect_flag("0F B2 m3 bad (16)", 16, lss_r, 3, C_BAD, 1);
+        expect_flag("66 0F B2 m3 bad (64)", 64, lss16_r, 4, C_BAD, 1);
+        expect_flag("0F B4 m3 bad (64)", 64, lfs_r, 3, C_BAD, 1);
+        expect_flag("0F B5 m3 bad (64)", 64, lgs_r, 3, C_BAD, 1);
+        expect_flag("0F C3 m3 bad (64)", 64, movnti_r, 3, C_BAD, 1);
+        expect_flag("0F C3 m3 bad (32)", 32, movnti_r, 3, C_BAD, 1);
+        expect_flag("0F E7 m3 bad (64)", 64, movntq_r, 3, C_BAD, 1);
+        expect_flag("0F E7 m3 bad (32)", 32, movntq_r, 3, C_BAD, 1);
+        expect_flag("66 0F E7 m3 bad (64)", 64, movntdq_r, 4, C_BAD, 1);
+        expect_flag("66 0F E7 m3 bad (16)", 16, movntdq_r, 4, C_BAD, 1);
+        expect_flag("F2 0F F0 m3 bad (64)", 64, lddqu_r, 4, C_BAD, 1);
+        expect_flag("F2 0F F0 m3 bad (32)", 32, lddqu_r, 4, C_BAD, 1);
+        expect_flag("lss [rax] not bad (64)", 64, lss_m, 3, C_BAD, 0);
+        expect_flag("lddqu m128 not bad (64)", 64, lddqu_m, 4, C_BAD, 0);
+
+        // PMOVMSKB and MASKMOVQ/MASKMOVDQU name a register r/m, and so does
+        // MOVDQ2Q -- F2 0F D6. The unprefixed and 66 readings of 0F D6 are
+        // the MOVQ r/m forms and stay legal at mod=3.
+        static const uint8_t pmovmskb_m[]   = { 0x0F, 0xD7, 0x00 };
+        static const uint8_t pmovmskb_r[]   = { 0x0F, 0xD7, 0xC0 };
+        static const uint8_t pmovmskb66_m[] = { 0x66, 0x0F, 0xD7, 0x00 };
+        static const uint8_t pmovmskb66_r[] = { 0x66, 0x0F, 0xD7, 0xC0 };
+        static const uint8_t maskmovq_m[]   = { 0x0F, 0xF7, 0x00 };
+        static const uint8_t maskmovq_r[]   = { 0x0F, 0xF7, 0xC0 };
+        static const uint8_t maskmovdqu_m[] = { 0x66, 0x0F, 0xF7, 0x00 };
+        static const uint8_t maskmovdqu_r[] = { 0x66, 0x0F, 0xF7, 0xC0 };
+        static const uint8_t movdq2q_m[]    = { 0xF2, 0x0F, 0xD6, 0x00 };
+        static const uint8_t movdq2q_r[]    = { 0xF2, 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq_r[]       = { 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq66_r[]     = { 0x66, 0x0F, 0xD6, 0xC0 };
+        static const uint8_t movq_m[]       = { 0x0F, 0xD6, 0x00 };
+        static const uint8_t movq66_m[]     = { 0x66, 0x0F, 0xD6, 0x00 };
+        expect_flag("0F D7 m bad (64)", 64, pmovmskb_m, 3, C_BAD, 1);
+        expect_flag("0F D7 m bad (32)", 32, pmovmskb_m, 3, C_BAD, 1);
+        expect_flag("0F D7 m bad (16)", 16, pmovmskb_m, 3, C_BAD, 1);
+        expect_flag("66 0F D7 m bad (64)", 64, pmovmskb66_m, 4, C_BAD, 1);
+        expect_flag("0F F7 m bad (64)", 64, maskmovq_m, 3, C_BAD, 1);
+        expect_flag("0F F7 m bad (32)", 32, maskmovq_m, 3, C_BAD, 1);
+        expect_flag("66 0F F7 m bad (64)", 64, maskmovdqu_m, 4, C_BAD, 1);
+        expect_flag("F2 0F D6 m bad (64)", 64, movdq2q_m, 4, C_BAD, 1);
+        expect_flag("F2 0F D6 m bad (32)", 32, movdq2q_m, 4, C_BAD, 1);
+        expect_flag("pmovmskb mm not bad (64)", 64, pmovmskb_r, 3, C_BAD, 0);
+        expect_flag("pmovmskb xmm not bad (64)", 64, pmovmskb66_r, 4, C_BAD, 0);
+        expect_flag("maskmovq not bad (64)", 64, maskmovq_r, 3, C_BAD, 0);
+        expect_flag("maskmovdqu not bad (64)", 64, maskmovdqu_r, 4, C_BAD, 0);
+        expect_flag("movdq2q not bad (64)", 64, movdq2q_r, 4, C_BAD, 0);
+        expect_flag("movq mm not bad (64)", 64, movq_r, 3, C_BAD, 0);
+        expect_flag("movq xmm not bad (64)", 64, movq66_r, 4, C_BAD, 0);
+        expect_flag("movq mm m64 not bad (64)", 64, movq_m, 3, C_BAD, 0);
+        expect_flag("movq xmm m64 not bad (64)", 64, movq66_m, 4, C_BAD, 0);
+
+        // The 0F 38 map holds the remaining memory-only r/m operands:
+        // MOVNTDQA, the INVEPT/INVVPID/INVPCID descriptors, MOVBE (whose F2
+        // reading is CRC32 instead), WRUSSD/WRUSSQ, WRSSD/WRSSQ, MOVDIR64B,
+        // ENQCMD/ENQCMDS and MOVDIRI.
+        static const uint8_t movntdqa_r[]  = { 0x66, 0x0F, 0x38, 0x2A, 0xC0 };
+        static const uint8_t movntdqa_m[]  = { 0x66, 0x0F, 0x38, 0x2A, 0x00 };
+        static const uint8_t invept_r[]    = { 0x66, 0x0F, 0x38, 0x80, 0xC0 };
+        static const uint8_t invvpid_r[]   = { 0x66, 0x0F, 0x38, 0x81, 0xC0 };
+        static const uint8_t invpcid_r[]   = { 0x66, 0x0F, 0x38, 0x82, 0xC0 };
+        static const uint8_t movbe_r0[]    = { 0x0F, 0x38, 0xF0, 0xC0 };
+        static const uint8_t movbe_r1[]    = { 0x0F, 0x38, 0xF1, 0xC0 };
+        static const uint8_t movbe16_r0[]  = { 0x66, 0x0F, 0x38, 0xF0, 0xC0 };
+        static const uint8_t movbe16_r1[]  = { 0x66, 0x0F, 0x38, 0xF1, 0xC0 };
+        static const uint8_t movbe_m0[]    = { 0x0F, 0x38, 0xF0, 0x00 };
+        static const uint8_t movbe_m1[]    = { 0x0F, 0x38, 0xF1, 0x00 };
+        static const uint8_t crc32_rm8[]   = { 0xF2, 0x0F, 0x38, 0xF0, 0xC0 };
+        static const uint8_t crc32_rm32[]  = { 0xF2, 0x0F, 0x38, 0xF1, 0xC0 };
+        static const uint8_t wruss_r[]     = { 0x66, 0x0F, 0x38, 0xF5, 0xC0 };
+        static const uint8_t wrss_r[]      = { 0x0F, 0x38, 0xF6, 0xC0 };
+        static const uint8_t movdir64b_r[] = { 0x66, 0x0F, 0x38, 0xF8, 0xC0 };
+        static const uint8_t enqcmd_r[]    = { 0xF2, 0x0F, 0x38, 0xF8, 0xC0 };
+        static const uint8_t movdiri_r[]   = { 0x0F, 0x38, 0xF9, 0xC0 };
+        expect_flag("66 0F 38 2A m3 bad (64)", 64, movntdqa_r, 5, C_BAD, 1);
+        expect_flag("66 0F 38 80 m3 bad (64)", 64, invept_r, 5, C_BAD, 1);
+        expect_flag("66 0F 38 81 m3 bad (64)", 64, invvpid_r, 5, C_BAD, 1);
+        expect_flag("66 0F 38 82 m3 bad (64)", 64, invpcid_r, 5, C_BAD, 1);
+        expect_flag("0F 38 F0 m3 bad (64)", 64, movbe_r0, 4, C_BAD, 1);
+        expect_flag("0F 38 F1 m3 bad (64)", 64, movbe_r1, 4, C_BAD, 1);
+        expect_flag("0F 38 F1 m3 bad (32)", 32, movbe_r1, 4, C_BAD, 1);
+        expect_flag("66 0F 38 F0 m3 bad (64)", 64, movbe16_r0, 5, C_BAD, 1);
+        expect_flag("66 0F 38 F1 m3 bad (16)", 16, movbe16_r1, 5, C_BAD, 1);
+        expect_flag("66 0F 38 F5 m3 bad (64)", 64, wruss_r, 5, C_BAD, 1);
+        expect_flag("0F 38 F6 m3 bad (64)", 64, wrss_r, 4, C_BAD, 1);
+        expect_flag("66 0F 38 F8 m3 bad (64)", 64, movdir64b_r, 5, C_BAD, 1);
+        expect_flag("F2 0F 38 F8 m3 bad (64)", 64, enqcmd_r, 5, C_BAD, 1);
+        expect_flag("0F 38 F9 m3 bad (64)", 64, movdiri_r, 4, C_BAD, 1);
+        expect_flag("movbe m32 not bad (64)", 64, movbe_m0, 4, C_BAD, 0);
+        expect_flag("movbe m32 store not bad (64)", 64, movbe_m1, 4, C_BAD, 0);
+        expect_flag("movntdqa not bad (64)", 64, movntdqa_m, 5, C_BAD, 0);
+        expect_flag("crc32 r/m8 not bad (64)", 64, crc32_rm8, 5, C_BAD, 0);
+        expect_flag("crc32 r/m32 not bad (64)", 64, crc32_rm32, 5, C_BAD, 0);
+    }
+    {
         // 0F 1E without a prefix is NOP Ev, the same class as 0F 1F: neither
         // the r/m register nor the memory operand is accessed. With F3 the
         // same opcode carries ENDBR64/32 (/7) and RDSSPD/RDSSPQ (/0).

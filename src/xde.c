@@ -1422,6 +1422,73 @@ got_opcode:
         if (diza->opcode == 0x62 && diza->map == XDE_MAP_LEGACY &&
             diza->enc == XDE_ENC_LEGACY && (mpeek >> 6) == 3)
             diza->flag |= C_BAD;
+        // LEA (8D /r) computes the address of its second operand, which the
+        // SDM spells as a memory operand, so a mod=3 ModR/M byte is not an
+        // encoding of it in any mode. The opcode sits in the legacy map and a
+        // REX2 prefix keeps that map, so this one test covers both.
+        if (diza->opcode == 0x8D && diza->map == XDE_MAP_LEGACY &&
+            (mpeek >> 6) == 3)
+            diza->flag |= C_BAD;
+        // MOVLPS (0F 13) and MOVHPS (0F 17) store to memory only -- the
+        // 66-prefixed MOVLPD/MOVHPD doubles and the REX2 encoding keep the
+        // same m64 r/m -- so their mod=3 encodings name no instruction.
+        // MOVNTPS (0F 2B) writes a whole m128 and is memory-only as well.
+        // The 0F 12 / 0F 16 loads are the forms that do have a mod=3
+        // encoding (MOVHLPS/MOVLHPS), so they are left alone.
+        if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) == 3 &&
+            (diza->opcode2 == 0x13 || diza->opcode2 == 0x17 ||
+             diza->opcode2 == 0x2B))
+            diza->flag |= C_BAD;
+        // MOVMSKPS (0F 50) and its 66-prefixed MOVMSKPD gather the packed
+        // sign bits out of an xmm register, so the r/m is a register and
+        // every mod other than 3 is an encoding of nothing.
+        if (diza->map == XDE_MAP_0F && legacy_enc &&
+            diza->opcode2 == 0x50 && (mpeek >> 6) != 3)
+            diza->flag |= C_BAD;
+        // The rest of the opcodes whose r/m the SDM fixes take it in memory
+        // or in a register in every form the encoding defines, so the mod
+        // value the other class names is reserved there as well.
+        //   66 0F 12 / 0F 16  MOVLPD/MOVHPD  m64   -- the plain and the
+        //     F3/F2 readings of the same opcodes (MOVHLPS/MOVLHPS, MOVSLDUP/
+        //     MOVSHDUP, MOVDDUP) have a register r/m and keep it.
+        //   0F B2 / 0F B4 / 0F B5  LSS/LFS/LGS  m16:16/32/64, the far
+        //     pointer loads.
+        //   0F C3  MOVNTI m32/m64, 0F E7 MOVNTQ m64 and its 66 MOVNTDQ m128.
+        //   F2 0F F0  LDDQU m128.
+        if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) == 3 &&
+            (((diza->opcode2 == 0x12 || diza->opcode2 == 0x16) &&
+              diza->p_66 && !diza->p_rep) ||
+             ((diza->opcode2 == 0xB2 || diza->opcode2 == 0xB4 ||
+               diza->opcode2 == 0xB5 || diza->opcode2 == 0xC3 ||
+               diza->opcode2 == 0xE7) && !diza->p_rep) ||
+             (diza->opcode2 == 0xF0 && diza->p_rep == 0xF2)))
+            diza->flag |= C_BAD;
+        // PMOVMSKB (0F D7, 66 for the xmm form) and MASKMOVQ/MASKMOVDQU
+        // (0F F7, 66 for the xmm form) name their r/m register, as does
+        // MOVDQ2Q (F2 0F D6); the plain and 66 readings of 0F D6 are the MOVQ
+        // r/m forms and must keep their mod=3 encoding.
+        if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) != 3 &&
+            (((diza->opcode2 == 0xD7 || diza->opcode2 == 0xF7) &&
+              !diza->p_rep) ||
+             (diza->opcode2 == 0xD6 && diza->p_rep == 0xF2)))
+            diza->flag |= C_BAD;
+        // The 0F 38 map: MOVNTDQA (66 0F 38 2A), the INVEPT/INVVPID/INVPCID
+        // descriptor operands (66 0F 38 80-82), MOVBE (0F 38 F0/F1, whose F2
+        // reading is CRC32), WRUSSD/WRUSSQ (66 0F 38 F5), WRSSD/WRSSQ
+        // (0F 38 F6), MOVDIR64B (66 0F 38 F8), ENQCMD/ENQCMDS (F2 0F 38 F8)
+        // and MOVDIRI (0F 38 F9) all take their r/m in memory.
+        if (diza->map == XDE_MAP_0F38 && legacy_enc && (mpeek >> 6) == 3 &&
+            ((diza->opcode3 == 0x2A && diza->p_66) ||
+             (diza->opcode3 == 0x80 && diza->p_66) ||
+             (diza->opcode3 == 0x81 && diza->p_66) ||
+             (diza->opcode3 == 0x82 && diza->p_66) ||
+             ((diza->opcode3 == 0xF0 || diza->opcode3 == 0xF1) &&
+              !diza->p_rep) ||
+             (diza->opcode3 == 0xF5 && diza->p_66) ||
+             (diza->opcode3 == 0xF6 && !diza->p_66 && !diza->p_rep) ||
+             (diza->opcode3 == 0xF8 && (diza->p_66 || diza->p_rep == 0xF2)) ||
+             (diza->opcode3 == 0xF9 && !diza->p_66 && !diza->p_rep)))
+            diza->flag |= C_BAD;
         // x87: the blank slots of the escape tables D8-DF, which the SDM
         // reserves and neither mod=3 (the ST(i) table) nor the memory table
         // assigns to an instruction.
