@@ -269,14 +269,28 @@ static void apply_usage_special(struct xde_instr *diza, uint32_t attr,
             if (c != 0xE3)
                 diza->dst_set |= xset;   // LOOP decrements the count
         }
+        // C6 F8 is XABORT rather than the group's MOV r/m8,imm8 form: the
+        // immediate ends up in bits 31:24 of EAX (SDM), which makes EAX the
+        // one operand and the byte ModR/M names not an operand at all. The
+        // sets built from the ModR/M byte above are replaced wholesale.
+        if (c == 0xC6 && (diza->enc == XDE_ENC_LEGACY ||
+                          diza->enc == XDE_ENC_REX2) && diza->modrm == 0xF8) {
+            diza->src_set = 0;
+            diza->src_set2 = 0;
+            diza->dst_set = XSET_EAX;
+            diza->dst_set2 = 0;
+        }
     } else if (diza->map == XDE_MAP_0F) {
         uint8_t c2 = (uint8_t)opcode2;
         if ((c2 == 0xB2) || (c2 == 0xB4) || (c2 == 0xB5) || (c2 == 0xA1) || (c2 == 0xA9))
             diza->dst_set |= XSET_OTHER;
         if ((c2 == 0xA0) || (c2 == 0xA8))
             diza->src_set |= XSET_OTHER;
+        // CPUID selects its leaf with EAX and, on the leaves that have them,
+        // its sub-leaf with ECX: both are inputs. It reports back in all four
+        // of EAX/EBX/ECX/EDX.
         if (c2 == 0xA2) {
-            diza->src_set |= XSET_EAX;
+            diza->src_set |= XSET_EAX | XSET_ECX;
             diza->dst_set |= XSET_EAX | XSET_EBX | XSET_ECX | XSET_EDX;
         }
         if ((c2 == 0xA5) || (c2 == 0xAD))
@@ -833,6 +847,32 @@ static void apply_implicit_gp(struct xde_instr *diza, uint32_t attr)
     }
 }
 
+// The x87 escapes (D8-DF) are two tables in one: with a memory operand the
+// ModR/M.reg field selects the operation, and at mod=3 the whole byte selects
+// an ST(i) form. The SDM's own escape tables (Vol 2D, Appendix A.5) leave
+// slots blank in both, and the footnote repeated under them is that "all
+// blanks in all opcode maps are reserved and must not be used":
+//
+//   memory: D9 /1, DB /4, DB /6, DD /5
+//   mod=3:  D9 D1-D7, D9 D8-DF, D9 E2/E3/E6/E7/EF, DA E0-E8, DA EA-FF,
+//           DB E6/E7, DB F8-FF, DC D0-DF, DD C8-CF, DD F0-FF, DE D0-D8,
+//           DE DA-DF, DF C8-DF, DF E1-E7, DF F8-FF
+//
+// Bit (reg * 8 + rm) of x87_res3[opcode - 0xD8] is a mod=3 slot, bit reg of
+// x87_resm[opcode - 0xD8] the memory form of that /reg field. The slots the
+// SDM also leaves blank but that another decoder still names are deliberately
+// left out: DB E0/E1/E4/E5 (the 8087/287 FENI/FDISI/FSETPM/FRSTPM) and
+// DF C0-C7 (FFREEP), both of which binutils decodes.
+static const uint64_t x87_res3[8] = {
+    0x0000000000000000ULL, 0x000080CCFFFE0000ULL,
+    0xFFFFFDFF00000000ULL, 0xFF0000C000000000ULL,
+    0x00000000FFFF0000ULL, 0xFFFF00000000FF00ULL,
+    0x00000000FDFF0000ULL, 0xFF0000FEFFFFFF00ULL
+};
+static const uint8_t x87_resm[8] = {
+    0x00, 0x02, 0x00, 0x50, 0x00, 0x20, 0x00, 0x00
+};
+
 static int parse_modrm(xde_cur *cur, struct xde_instr *diza, uint32_t attr)
 {
     uint8_t m, sib;
@@ -1286,9 +1326,15 @@ got_opcode:
     if (attr & XA_MODRM) {
         uint8_t mpeek;
         unsigned reg;
+        int legacy_enc;
         if (!peek_byte(&cur, 0, &mpeek))
             return 0;
         reg = (mpeek >> 3) & 7;
+        // The reserved forms below exist only in the legacy encoding: a VEX /
+        // EVEX / XOP opcode selects map 0F or the legacy map with an opcode
+        // byte of its own, and defines none of these groups. REX2 carries the
+        // same map and opcode bytes as the legacy encoding it prefixes.
+        legacy_enc = (diza->enc == XDE_ENC_LEGACY || diza->enc == XDE_ENC_REX2);
         if (attr & XA_GROUP) {
             unsigned gid = XA_GRP_ID(attr);
             if (gid < XG_COUNT) {
@@ -1331,6 +1377,64 @@ got_opcode:
             ((diza->opcode2 == 0x18 && reg <= 3) ||
              (diza->opcode2 == 0x0D && reg <= 1)))
             diza->flag |= C_BAD;
+        // The 0F 00 group defines SLDT/STR (/0 /1), LLDT/LTR (/2 /3) and
+        // VERR/VERW (/4 /5) in the register form and the memory form alike, so
+        // /6 and /7 are not an encoding of anything in either of them. A REX2
+        // prefix keeps the 0F map and writes the opcode to opcode2 itself,
+        // which is why these rules read opcode2 rather than opcode.
+        if (diza->map == XDE_MAP_0F && diza->opcode2 == 0x00 &&
+            reg >= 6 && legacy_enc)
+            diza->flag |= C_BAD;
+        // 0F 01 keeps its memory table and its register table apart. The
+        // memory forms are SGDT/SIDT (/0 /1), LGDT/LIDT (/2 /3), SMSW (/4),
+        // LMSW (/6) and INVLPG (/7): /5 is reserved there. The register form
+        // (mod=3) holds a second table, in which the SDM leaves 0F 01 C6/C7,
+        // CC-CE, D2/D3 and E9-ED reserved; every other mod=3 encoding names an
+        // instruction (ENCLV/VMCALL/VMLAUNCH/VMRESUME/VMXOFF/PCONFIG,
+        // MONITOR/MWAIT/CLAC/STAC/ENCLS, XGETBV/XSETBV/VMFUNC/XEND/XTEST/
+        // ENCLU, VMRUN and the rest of the SVM group, SERIALIZE, RDPKRU/
+        // WRPKRU, SWAPGS/RDTSCP, and the MONITORX/MWAITX/CLZERO/RDPRU/
+        // INVLPGB/TLBSYNC additions). SMSW /4 and LMSW /6, whose r/m16 the
+        // SDM defines with a register operand too, are not part of that table.
+        if (diza->map == XDE_MAP_0F && diza->opcode2 == 0x01 && legacy_enc) {
+            unsigned rm = mpeek & 7;
+            if ((mpeek >> 6) != 3) {
+                if (reg == 5)
+                    diza->flag |= C_BAD;            // memory form of /5
+            } else if ((reg == 0 && rm >= 6) ||
+                       (reg == 1 && rm >= 4 && rm <= 6) ||
+                       (reg == 2 && (rm == 2 || rm == 3)) ||
+                       (reg == 5 && rm >= 1 && rm <= 5)) {
+                diza->flag |= C_BAD;
+            }
+        }
+        // Far CALL (/3) and far JMP (/5) take a memory operand only, so their
+        // mod=3 encodings are not instructions either. /2 and /4 are the near
+        // CALL/JMP r/m forms and stay legal with a register operand, and /7
+        // stays reserved in both forms.
+        if (diza->opcode == 0xFF && diza->map == XDE_MAP_LEGACY &&
+            (mpeek >> 6) == 3 && (reg == 3 || reg == 5) && legacy_enc)
+            diza->flag |= C_BAD;
+        // BOUND (62 /r) reads a pair of bounds from memory, so its mod=3
+        // encodings are reserved. Only the legacy forms reach this point: 0x62
+        // is taken as an EVEX prefix first, and BOUND is invalid in 64-bit
+        // mode, where the REX2 form could arise.
+        if (diza->opcode == 0x62 && diza->map == XDE_MAP_LEGACY &&
+            diza->enc == XDE_ENC_LEGACY && (mpeek >> 6) == 3)
+            diza->flag |= C_BAD;
+        // x87: the blank slots of the escape tables D8-DF, which the SDM
+        // reserves and neither mod=3 (the ST(i) table) nor the memory table
+        // assigns to an instruction.
+        if (diza->map == XDE_MAP_LEGACY && diza->opcode >= 0xD8 &&
+            diza->opcode <= 0xDF && legacy_enc) {
+            unsigned rm = mpeek & 7;
+            if ((mpeek >> 6) == 3) {
+                if (x87_res3[diza->opcode - 0xD8] & (1ULL << (reg * 8 + rm)))
+                    diza->flag |= C_BAD;
+            } else if (x87_resm[diza->opcode - 0xD8] & (1u << reg)) {
+                diza->flag |= C_BAD;
+            }
+        }
         if (diza->opcode == 0xF6 && diza->map == XDE_MAP_LEGACY) {
             if (reg != 2)
                 diza->dst_set |= XSET_FL;   // NOT (/2) writes no flags

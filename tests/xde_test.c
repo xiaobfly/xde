@@ -443,7 +443,23 @@ int main(void)
     }
     {
         static const uint8_t bound[] = { 0x62, 0x00 };
+        static const uint8_t bound1[] = { 0x62, 0x08 };
+        static const uint8_t bound3_0[] = { 0x62, 0xC0 };
+        static const uint8_t bound3_3[] = { 0x62, 0xDF };
+        static const uint8_t bound3_7[] = { 0x62, 0xF8 };
+        static const uint8_t evex32[] = { 0x62, 0xF1, 0x7C, 0x48, 0x58, 0xC1 };
         expect_len("bound eax,[eax] (32)", 32, bound, 2, 2);
+        expect_flag("bound [eax] not bad", 32, bound, 2, C_BAD, 0);
+        expect_flag("bound [eax] /1 not bad", 32, bound1, 2, C_BAD, 0);
+        // BOUND reads a pair of bounds from memory, so its mod=3 encodings are
+        // reserved. The EVEX prefix that shares the 0x62 lead byte is taken
+        // first and is unaffected.
+        expect_flag("62 /0 m3 bad (32)", 32, bound3_0, 2, C_BAD, 1);
+        expect_flag("62 /3 m3 bad (32)", 32, bound3_3, 2, C_BAD, 1);
+        expect_flag("62 /7 m3 bad (32)", 32, bound3_7, 2, C_BAD, 1);
+        expect_flag("62 /0 m3 bad (16)", 16, bound3_0, 2, C_BAD, 1);
+        expect_enc("evex vaddps (32-bit)", 32, evex32, 6, 6, XDE_ENC_EVEX);
+        expect_flag("evex vaddps not bad (32)", 32, evex32, 6, C_BAD, 0);
     }
     {
         static const uint8_t inc[] = { 0x40 };
@@ -894,6 +910,8 @@ int main(void)
     {
         static const uint8_t cpuid[] = { 0x0F, 0xA2 };
         expect_set("cpuid src EAX", 64, cpuid, 2, 0, XSET_EAX, 1);
+        // The leaf's sub-leaf index is an input in ECX as well.
+        expect_set("cpuid src ECX", 64, cpuid, 2, 0, XSET_ECX, 1);
         expect_set("cpuid dst EAX", 64, cpuid, 2, 1, XSET_EAX, 1);
         expect_set("cpuid dst EBX", 64, cpuid, 2, 1, XSET_EBX, 1);
         expect_set("cpuid dst ECX", 64, cpuid, 2, 1, XSET_ECX, 1);
@@ -1699,6 +1717,7 @@ int main(void)
         static const uint8_t xabort[] = { 0xC6, 0xF8, 0x00 };
         static const uint8_t xbegin_bad[] = { 0xC7, 0xFA, 0x00, 0x00, 0x00, 0x00 };
         static const uint8_t xabort_bad[] = { 0xC6, 0xFA, 0x00 };
+        static const uint8_t mov_al_imm[] = { 0xC6, 0xC0, 0x00 };
         static const uint8_t mov_store[] = { 0xC7, 0x04, 0x24, 0x00, 0x00, 0x00, 0x00 };
         expect_flag("xbegin not bad", 64, xbegin, 6, C_BAD, 0);
         expect_flag("xabort not bad", 64, xabort, 3, C_BAD, 0);
@@ -1706,6 +1725,13 @@ int main(void)
         // Only the F8 ModR/M is XBEGIN/XABORT; every other /7 stays invalid.
         expect_flag("C7 FA still bad", 64, xbegin_bad, 6, C_BAD, 1);
         expect_flag("C6 FA still bad", 64, xabort_bad, 3, C_BAD, 1);
+        // XABORT puts its immediate in bits 31:24 of EAX, so EAX is its one
+        // operand and the AL the group's r/m8 form would name is not one.
+        expect_seteq("xabort dst EAX", 64, xabort, 3, 1, XSET_EAX);
+        expect_seteq("xabort src none", 64, xabort, 3, 0, 0);
+        // C6 /0 stays the MOV r/m8,imm8 form, with the byte's r/m as its
+        // destination register.
+        expect_seteq("mov al,imm8 dst", 64, mov_al_imm, 3, 1, XSET_AL);
     }
     {
         // 0F 00 / 0F 01 / 0F 02 / 0F 03: the table marks the whole group
@@ -1834,6 +1860,228 @@ int main(void)
         expect_flag("0F 01 /5 keeps undef", 64, grp7_5, 3, C_UNDEF, 1);
         expect_flag("vmcall keeps undef", 64, vmcall, 3, C_UNDEF, 1);
         expect_flag("vex 0F 00 keeps undef", 64, vex_grp6, 4, C_UNDEF, 1);
+    }
+    {
+        // The reserved slots of those two groups are what C_BAD is for. The
+        // 0F 00 group leaves /6 and /7 out of its register table and its
+        // memory table alike, so every ModR/M byte with those reg values is
+        // unusable in every mode. 0F 01 reserves /5 in its memory table only,
+        // and the register table it switches to at mod=3 leaves C6/C7, CC-CE,
+        // D2/D3 and E9-ED unassigned. The slots around those holes are real
+        // instructions and must not be marked.
+        static const uint8_t g6_6m3[]   = { 0x0F, 0x00, 0xF0 };             // 0F 00 /6
+        static const uint8_t g6_7m3[]   = { 0x0F, 0x00, 0xF8 };             // 0F 00 /7
+        static const uint8_t g6_6m0[]   = { 0x0F, 0x00, 0x30 };             // 0F 00 /6 [rax]
+        static const uint8_t g6_6m1[]   = { 0x0F, 0x00, 0x70, 0x00 };       // ... [rax+0]
+        static const uint8_t g6_6m2[]   = { 0x0F, 0x00, 0xB0, 0, 0, 0, 0 }; // ... [rax+0]
+        static const uint8_t g6_7m0[]   = { 0x0F, 0x00, 0x38 };             // 0F 00 /7 [rax]
+        static const uint8_t rex2_g6_6[] = { 0xD5, 0x80, 0x00, 0xF0 };      // rex2 0F 00 /6
+        static const uint8_t sldt_r[]   = { 0x0F, 0x00, 0xC0 };             // sldt eax
+        static const uint8_t verw_r[]   = { 0x0F, 0x00, 0xE8 };             // verw ax
+        static const uint8_t sldt_m[]   = { 0x0F, 0x00, 0x00 };             // sldt [rax]
+        static const uint8_t verr_m[]   = { 0x0F, 0x00, 0x20 };             // verr [rax]
+        static const uint8_t g7_5m0[]   = { 0x0F, 0x01, 0x28 };             // 0F 01 /5 [rax]
+        static const uint8_t g7_5m1[]   = { 0x0F, 0x01, 0x68, 0x00 };
+        static const uint8_t g7_5m2[]   = { 0x0F, 0x01, 0xA8, 0, 0, 0, 0 };
+        static const uint8_t g7_5rm7[]  = { 0x0F, 0x01, 0x3D, 0, 0, 0, 0 }; // 0F 01 /7 INVLPG
+        static const uint8_t smsw_m[]   = { 0x0F, 0x01, 0x20 };             // 0F 01 /4 [rax]
+        static const uint8_t serialize[] = { 0x0F, 0x01, 0xE8 };
+        static const uint8_t rdpkru[]   = { 0x0F, 0x01, 0xEE };
+        static const uint8_t wrpkru[]   = { 0x0F, 0x01, 0xEF };
+        static const uint8_t r_c6[]     = { 0x0F, 0x01, 0xC6 };
+        static const uint8_t r_c7[]     = { 0x0F, 0x01, 0xC7 };
+        static const uint8_t r_cc[]     = { 0x0F, 0x01, 0xCC };
+        static const uint8_t r_cd[]     = { 0x0F, 0x01, 0xCD };
+        static const uint8_t r_ce[]     = { 0x0F, 0x01, 0xCE };
+        static const uint8_t r_d2[]     = { 0x0F, 0x01, 0xD2 };
+        static const uint8_t r_d3[]     = { 0x0F, 0x01, 0xD3 };
+        static const uint8_t r_e9[]     = { 0x0F, 0x01, 0xE9 };
+        static const uint8_t r_ea[]     = { 0x0F, 0x01, 0xEA };
+        static const uint8_t r_eb[]     = { 0x0F, 0x01, 0xEB };
+        static const uint8_t r_ec[]     = { 0x0F, 0x01, 0xEC };
+        static const uint8_t r_ed[]     = { 0x0F, 0x01, 0xED };
+        static const uint8_t d_c0[]     = { 0x0F, 0x01, 0xC0 };  // ENCLV
+        static const uint8_t d_c5[]     = { 0x0F, 0x01, 0xC5 };  // PCONFIG
+        static const uint8_t d_cf[]     = { 0x0F, 0x01, 0xCF };  // ENCLS
+        static const uint8_t d_d7[]     = { 0x0F, 0x01, 0xD7 };  // ENCLU
+        static const uint8_t d_d8[]     = { 0x0F, 0x01, 0xD8 };  // VMRUN
+        static const uint8_t d_df[]     = { 0x0F, 0x01, 0xDF };  // INVLPGA
+        static const uint8_t d_f8[]     = { 0x0F, 0x01, 0xF8 };  // SWAPGS
+        static const uint8_t smsw_r[]   = { 0x0F, 0x01, 0xE0 };  // smsw eax
+
+        expect_flag("0F 00 /6 bad", 64, g6_6m3, 3, C_BAD, 1);
+        expect_flag("0F 00 /7 bad", 64, g6_7m3, 3, C_BAD, 1);
+        expect_flag("0F 00 /6 m0 bad", 64, g6_6m0, 3, C_BAD, 1);
+        expect_flag("0F 00 /6 m1 bad", 64, g6_6m1, 4, C_BAD, 1);
+        expect_flag("0F 00 /6 m2 bad", 64, g6_6m2, 7, C_BAD, 1);
+        expect_flag("0F 00 /7 m0 bad", 64, g6_7m0, 3, C_BAD, 1);
+        expect_flag("0F 00 /6 m3 bad (32)", 32, g6_6m3, 3, C_BAD, 1);
+        expect_flag("rex2 0F 00 /6 bad", 64, rex2_g6_6, 4, C_BAD, 1);
+        expect_flag("sldt eax not bad", 64, sldt_r, 3, C_BAD, 0);
+        expect_flag("verw ax not bad", 64, verw_r, 3, C_BAD, 0);
+        expect_flag("sldt [rax] not bad", 64, sldt_m, 3, C_BAD, 0);
+        expect_flag("verr [rax] not bad", 64, verr_m, 3, C_BAD, 0);
+        expect_flag("0F 01 /5 m0 bad", 64, g7_5m0, 3, C_BAD, 1);
+        expect_flag("0F 01 /5 m1 bad", 64, g7_5m1, 4, C_BAD, 1);
+        expect_flag("0F 01 /5 m2 bad", 64, g7_5m2, 7, C_BAD, 1);
+        expect_flag("0F 01 /5 m0 bad (32)", 32, g7_5m0, 3, C_BAD, 1);
+        expect_flag("0F 01 /7 m not bad", 64, g7_5rm7, 7, C_BAD, 0);
+        expect_flag("0F 01 /4 m not bad", 64, smsw_m, 3, C_BAD, 0);
+        expect_flag("serialize not bad", 64, serialize, 3, C_BAD, 0);
+        expect_flag("rdpkru not bad", 64, rdpkru, 3, C_BAD, 0);
+        expect_flag("wrpkru not bad", 64, wrpkru, 3, C_BAD, 0);
+        expect_flag("0F 01 C6 bad", 64, r_c6, 3, C_BAD, 1);
+        expect_flag("0F 01 C7 bad", 64, r_c7, 3, C_BAD, 1);
+        expect_flag("0F 01 CC bad", 64, r_cc, 3, C_BAD, 1);
+        expect_flag("0F 01 CD bad", 64, r_cd, 3, C_BAD, 1);
+        expect_flag("0F 01 CE bad", 64, r_ce, 3, C_BAD, 1);
+        expect_flag("0F 01 D2 bad", 64, r_d2, 3, C_BAD, 1);
+        expect_flag("0F 01 D3 bad", 64, r_d3, 3, C_BAD, 1);
+        expect_flag("0F 01 E9 bad", 64, r_e9, 3, C_BAD, 1);
+        expect_flag("0F 01 EA bad", 64, r_ea, 3, C_BAD, 1);
+        expect_flag("0F 01 EB bad", 64, r_eb, 3, C_BAD, 1);
+        expect_flag("0F 01 EC bad", 64, r_ec, 3, C_BAD, 1);
+        expect_flag("0F 01 ED bad", 64, r_ed, 3, C_BAD, 1);
+        expect_flag("enclv not bad", 64, d_c0, 3, C_BAD, 0);
+        expect_flag("pconfig not bad", 64, d_c5, 3, C_BAD, 0);
+        expect_flag("encls not bad", 64, d_cf, 3, C_BAD, 0);
+        expect_flag("enclu not bad", 64, d_d7, 3, C_BAD, 0);
+        expect_flag("vmrun not bad", 64, d_d8, 3, C_BAD, 0);
+        expect_flag("invlpga not bad", 64, d_df, 3, C_BAD, 0);
+        expect_flag("swapgs not bad", 64, d_f8, 3, C_BAD, 0);
+        expect_flag("smsw eax not bad", 64, smsw_r, 3, C_BAD, 0);
+    }
+
+    {
+        // x87 (D8-DF): the SDM's escape tables leave slots blank in the memory
+        // table (D9 /1, DB /4, DB /6, DD /5) and in the mod=3 ST(i) table, and
+        // reserve every blank. Those slots carry C_BAD; the slots holding the
+        // forms around them do not. The SDM also leaves DB E0/E1/E4/E5 and
+        // DF C0-C7 blank, but a second decoder names those (the 8087/287
+        // FENI/FDISI/FSETPM/FRSTPM and FFREEP), so they stay unmarked.
+        static const uint8_t fld_m32[] = { 0xD9, 0x00 };
+        static const uint8_t d9_1m0[]  = { 0xD9, 0x08 };
+        static const uint8_t d9_1m1[]  = { 0xD9, 0x48, 0x00 };
+        static const uint8_t d9_1m2[]  = { 0xD9, 0x88, 0, 0, 0, 0 };
+        static const uint8_t d9_1m5[]  = { 0xD9, 0x0D, 0, 0, 0, 0 };
+        static const uint8_t db_4m[]   = { 0xDB, 0x20 };
+        static const uint8_t db_6m[]   = { 0xDB, 0x30 };
+        static const uint8_t dd_5m[]   = { 0xDD, 0x28 };
+        static const uint8_t db_5m[]   = { 0xDB, 0x28 };
+        static const uint8_t dd_6m[]   = { 0xDD, 0x30 };
+        static const uint8_t d9_d1[]   = { 0xD9, 0xD1 };
+        static const uint8_t d9_d7[]   = { 0xD9, 0xD7 };
+        static const uint8_t d9_d8[]   = { 0xD9, 0xD8 };
+        static const uint8_t d9_df[]   = { 0xD9, 0xDF };
+        static const uint8_t d9_e2[]   = { 0xD9, 0xE2 };
+        static const uint8_t d9_ef[]   = { 0xD9, 0xEF };
+        static const uint8_t da_e0[]   = { 0xDA, 0xE0 };
+        static const uint8_t da_e8[]   = { 0xDA, 0xE8 };
+        static const uint8_t da_ea[]   = { 0xDA, 0xEA };
+        static const uint8_t da_ff[]   = { 0xDA, 0xFF };
+        static const uint8_t db_e6[]   = { 0xDB, 0xE6 };
+        static const uint8_t db_f8[]   = { 0xDB, 0xF8 };
+        static const uint8_t db_ff[]   = { 0xDB, 0xFF };
+        static const uint8_t dc_d0[]   = { 0xDC, 0xD0 };
+        static const uint8_t dc_df[]   = { 0xDC, 0xDF };
+        static const uint8_t dd_c8[]   = { 0xDD, 0xC8 };
+        static const uint8_t dd_cf[]   = { 0xDD, 0xCF };
+        static const uint8_t dd_f0[]   = { 0xDD, 0xF0 };
+        static const uint8_t dd_ff[]   = { 0xDD, 0xFF };
+        static const uint8_t de_d0[]   = { 0xDE, 0xD0 };
+        static const uint8_t de_d8[]   = { 0xDE, 0xD8 };
+        static const uint8_t de_da[]   = { 0xDE, 0xDA };
+        static const uint8_t df_c8[]   = { 0xDF, 0xC8 };
+        static const uint8_t df_df[]   = { 0xDF, 0xDF };
+        static const uint8_t df_e1[]   = { 0xDF, 0xE1 };
+        static const uint8_t df_f8[]   = { 0xDF, 0xF8 };
+        static const uint8_t d9_c0[]   = { 0xD9, 0xC0 };
+        static const uint8_t d9_d0[]   = { 0xD9, 0xD0 };
+        static const uint8_t d9_e0[]   = { 0xD9, 0xE0 };
+        static const uint8_t d9_f8[]   = { 0xD9, 0xF8 };
+        static const uint8_t da_c0[]   = { 0xDA, 0xC0 };
+        static const uint8_t da_e9[]   = { 0xDA, 0xE9 };
+        static const uint8_t db_c0[]   = { 0xDB, 0xC0 };
+        static const uint8_t db_e2[]   = { 0xDB, 0xE2 };
+        static const uint8_t db_e3[]   = { 0xDB, 0xE3 };
+        static const uint8_t db_e8[]   = { 0xDB, 0xE8 };
+        static const uint8_t db_f0[]   = { 0xDB, 0xF0 };
+        static const uint8_t dc_c0[]   = { 0xDC, 0xC0 };
+        static const uint8_t dc_e0[]   = { 0xDC, 0xE0 };
+        static const uint8_t dd_c0[]   = { 0xDD, 0xC0 };
+        static const uint8_t dd_d0[]   = { 0xDD, 0xD0 };
+        static const uint8_t dd_e8[]   = { 0xDD, 0xE8 };
+        static const uint8_t de_c0[]   = { 0xDE, 0xC0 };
+        static const uint8_t de_d9[]   = { 0xDE, 0xD9 };
+        static const uint8_t df_e0[]   = { 0xDF, 0xE0 };
+        static const uint8_t df_e8[]   = { 0xDF, 0xE8 };
+        static const uint8_t df_f0[]   = { 0xDF, 0xF0 };
+        static const uint8_t df_c0[]   = { 0xDF, 0xC0 };
+        static const uint8_t db_e0[]   = { 0xDB, 0xE0 };
+        static const uint8_t db_e4[]   = { 0xDB, 0xE4 };
+
+        expect_flag("x87 D9 /1 m0 bad", 64, d9_1m0, 2, C_BAD, 1);
+        expect_flag("x87 D9 /1 m1 bad", 64, d9_1m1, 3, C_BAD, 1);
+        expect_flag("x87 D9 /1 m2 bad", 64, d9_1m2, 6, C_BAD, 1);
+        expect_flag("x87 D9 /1 rm5 bad", 64, d9_1m5, 6, C_BAD, 1);
+        expect_flag("x87 D9 /1 m0 bad (32)", 32, d9_1m0, 2, C_BAD, 1);
+        expect_flag("x87 DB /4 m bad", 64, db_4m, 2, C_BAD, 1);
+        expect_flag("x87 DB /6 m bad", 64, db_6m, 2, C_BAD, 1);
+        expect_flag("x87 DD /5 m bad", 64, dd_5m, 2, C_BAD, 1);
+        expect_flag("x87 fld m32 not bad", 64, fld_m32, 2, C_BAD, 0);
+        expect_flag("x87 DB /5 m not bad", 64, db_5m, 2, C_BAD, 0);
+        expect_flag("x87 DD /6 m not bad", 64, dd_6m, 2, C_BAD, 0);
+        expect_flag("x87 D9 D1 bad", 64, d9_d1, 2, C_BAD, 1);
+        expect_flag("x87 D9 D7 bad", 64, d9_d7, 2, C_BAD, 1);
+        expect_flag("x87 D9 D8 bad", 64, d9_d8, 2, C_BAD, 1);
+        expect_flag("x87 D9 DF bad", 64, d9_df, 2, C_BAD, 1);
+        expect_flag("x87 D9 E2 bad", 64, d9_e2, 2, C_BAD, 1);
+        expect_flag("x87 D9 EF bad", 64, d9_ef, 2, C_BAD, 1);
+        expect_flag("x87 DA E0 bad", 64, da_e0, 2, C_BAD, 1);
+        expect_flag("x87 DA E8 bad", 64, da_e8, 2, C_BAD, 1);
+        expect_flag("x87 DA EA bad", 64, da_ea, 2, C_BAD, 1);
+        expect_flag("x87 DA FF bad", 64, da_ff, 2, C_BAD, 1);
+        expect_flag("x87 DB E6 bad", 64, db_e6, 2, C_BAD, 1);
+        expect_flag("x87 DB F8 bad", 64, db_f8, 2, C_BAD, 1);
+        expect_flag("x87 DB FF bad", 64, db_ff, 2, C_BAD, 1);
+        expect_flag("x87 DC D0 bad", 64, dc_d0, 2, C_BAD, 1);
+        expect_flag("x87 DC DF bad", 64, dc_df, 2, C_BAD, 1);
+        expect_flag("x87 DD C8 bad", 64, dd_c8, 2, C_BAD, 1);
+        expect_flag("x87 DD CF bad", 64, dd_cf, 2, C_BAD, 1);
+        expect_flag("x87 DD F0 bad", 64, dd_f0, 2, C_BAD, 1);
+        expect_flag("x87 DD FF bad", 64, dd_ff, 2, C_BAD, 1);
+        expect_flag("x87 DE D0 bad", 64, de_d0, 2, C_BAD, 1);
+        expect_flag("x87 DE D8 bad", 64, de_d8, 2, C_BAD, 1);
+        expect_flag("x87 DE DA bad", 64, de_da, 2, C_BAD, 1);
+        expect_flag("x87 DF C8 bad", 64, df_c8, 2, C_BAD, 1);
+        expect_flag("x87 DF DF bad", 64, df_df, 2, C_BAD, 1);
+        expect_flag("x87 DF E1 bad", 64, df_e1, 2, C_BAD, 1);
+        expect_flag("x87 DF F8 bad", 64, df_f8, 2, C_BAD, 1);
+        expect_flag("x87 D9 CF bad (32)", 32, dd_cf, 2, C_BAD, 1);
+        expect_flag("x87 fld st0 not bad", 64, d9_c0, 2, C_BAD, 0);
+        expect_flag("x87 fnop not bad", 64, d9_d0, 2, C_BAD, 0);
+        expect_flag("x87 fchs not bad", 64, d9_e0, 2, C_BAD, 0);
+        expect_flag("x87 fprem not bad", 64, d9_f8, 2, C_BAD, 0);
+        expect_flag("x87 fcmovb not bad", 64, da_c0, 2, C_BAD, 0);
+        expect_flag("x87 fucompp not bad", 64, da_e9, 2, C_BAD, 0);
+        expect_flag("x87 fcmovnb not bad", 64, db_c0, 2, C_BAD, 0);
+        expect_flag("x87 fnclex not bad", 64, db_e2, 2, C_BAD, 0);
+        expect_flag("x87 fninit not bad", 64, db_e3, 2, C_BAD, 0);
+        expect_flag("x87 fucomi not bad", 64, db_e8, 2, C_BAD, 0);
+        expect_flag("x87 fcomi not bad", 64, db_f0, 2, C_BAD, 0);
+        expect_flag("x87 fadd st0 not bad", 64, dc_c0, 2, C_BAD, 0);
+        expect_flag("x87 fsubr st0 not bad", 64, dc_e0, 2, C_BAD, 0);
+        expect_flag("x87 ffree not bad", 64, dd_c0, 2, C_BAD, 0);
+        expect_flag("x87 fst st0 not bad", 64, dd_d0, 2, C_BAD, 0);
+        expect_flag("x87 fucomp not bad", 64, dd_e8, 2, C_BAD, 0);
+        expect_flag("x87 faddp not bad", 64, de_c0, 2, C_BAD, 0);
+        expect_flag("x87 fcompp not bad", 64, de_d9, 2, C_BAD, 0);
+        expect_flag("x87 fnstsw not bad", 64, df_e0, 2, C_BAD, 0);
+        expect_flag("x87 fucomip not bad", 64, df_e8, 2, C_BAD, 0);
+        expect_flag("x87 fcomip not bad", 64, df_f0, 2, C_BAD, 0);
+        expect_flag("x87 ffreep not bad", 64, df_c0, 2, C_BAD, 0);
+        expect_flag("x87 fneni not bad", 64, db_e0, 2, C_BAD, 0);
+        expect_flag("x87 fnsetpm not bad", 64, db_e4, 2, C_BAD, 0);
     }
 
     // XA_BAD means "not a usable encoding in any mode", so the legacy forms
@@ -2000,8 +2248,29 @@ int main(void)
         // Still-illegal group entries keep C_BAD.
         static const uint8_t grp5_7[] = { 0xFF, 0xF8 };
         static const uint8_t ud1[] = { 0x0F, 0xB9, 0x00 };
+        // Far CALL (/3) and far JMP (/5) read their target from memory only,
+        // so the mod=3 encodings of those two reg values are not instructions.
+        // The near CALL/JMP r/m forms (/2 and /4) take a register operand, and
+        // /3 and /5 stay legal with a memory operand.
+        static const uint8_t far3_r0[] = { 0xFF, 0xD8 };
+        static const uint8_t far3_r7[] = { 0xFF, 0xDF };
+        static const uint8_t far5_r0[] = { 0xFF, 0xE8 };
+        static const uint8_t far5_r7[] = { 0xFF, 0xEF };
+        static const uint8_t near2[] = { 0xFF, 0xD0 };
+        static const uint8_t near4[] = { 0xFF, 0xE0 };
+        static const uint8_t far3_m[] = { 0xFF, 0x18 };
+        static const uint8_t far5_m[] = { 0xFF, 0x28 };
         expect_flag("FF /7 still bad", 64, grp5_7, 2, C_BAD, 1);
         expect_flag("0F B9 UD1 still bad", 64, ud1, 3, C_BAD, 1);
+        expect_flag("FF /3 m3 bad", 64, far3_r0, 2, C_BAD, 1);
+        expect_flag("FF /3 m3 rm7 bad", 64, far3_r7, 2, C_BAD, 1);
+        expect_flag("FF /5 m3 bad", 64, far5_r0, 2, C_BAD, 1);
+        expect_flag("FF /5 m3 rm7 bad", 64, far5_r7, 2, C_BAD, 1);
+        expect_flag("FF /3 m3 bad (32)", 32, far3_r0, 2, C_BAD, 1);
+        expect_flag("FF /2 m3 not bad", 64, near2, 2, C_BAD, 0);
+        expect_flag("FF /4 m3 not bad", 64, near4, 2, C_BAD, 0);
+        expect_flag("FF /3 m not bad", 64, far3_m, 2, C_BAD, 0);
+        expect_flag("FF /5 m not bad", 64, far5_m, 2, C_BAD, 0);
     }
 
     // 16-bit
