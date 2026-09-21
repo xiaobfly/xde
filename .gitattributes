@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# src/xdetbl.c is written by tools/gen_tables.py with an explicit LF
+# newline. Without this pin a checkout turns it into CRLF, and the
+# generator then looks like it rewrites the whole file.
+src/xdetbl.c text eol=lf
