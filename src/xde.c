@@ -873,6 +873,15 @@ static const uint8_t x87_resm[8] = {
     0x00, 0x02, 0x00, 0x50, 0x00, 0x20, 0x00, 0x00
 };
 
+// 3DNow! spells its opcode in the immediate byte of 0F 0F /r ib, and AMD
+// assigned it only 24 values: 0C and 0D (PI2FW, PI2FD), 1C and 1D (PF2IW,
+// PF2ID) and the twenty from 8A to BF. Bit (sel & 63) of now_ok[sel >> 6] is
+// one of them; the remaining 232 selectors name no instruction.
+static const uint64_t now_ok[4] = {
+    0x0000000030003000ULL, 0x0000000000000000ULL,
+    0x88D144D144D14400ULL, 0x0000000000000000ULL
+};
+
 // An SSE instruction spells its mandatory prefix out as part of the opcode:
 // the SDM defines 66 0F 6C as PUNPCKLQDQ and none of the other three
 // prefixes as anything, and 0F B8 as POPCNT only under F3. The bit per prefix
@@ -1737,8 +1746,19 @@ got_opcode:
         else if (dbytes == 6) diza->flag |= C_DATA4 | C_DATA2;
     }
 
-    // 3DNow needs no special case here: the table models the trailing opcode
-    // byte as XA_IMM_IB, and XA_3DNOW only sets C_3DNOW.
+    // 3DNow! puts its opcode in the trailing immediate byte, which the copy
+    // above has just stored, so this test belongs after it rather than with
+    // the ModR/M group. Only the selectors AMD assigned name an instruction
+    // and a prefix does not change that either way.
+    if (diza->map == XDE_MAP_0F && diza->opcode2 == 0x0F && legacy_enc &&
+        diza->datasize == 1) {
+        unsigned sel = diza->data_b[0];
+        if (!(now_ok[sel >> 6] & (1ULL << (sel & 63))))
+            diza->flag |= C_BAD;
+    }
+
+    // 3DNow keeps its own flag: the table marks 0F 0F with XA_3DNOW, which
+    // sets C_3DNOW, and the selector above is the immediate byte it names.
     {
         unsigned len = (unsigned)(cur.p - opcode);
         if (len == 0 || len > XDE_MAXLEN)

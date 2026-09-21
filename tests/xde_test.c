@@ -2069,6 +2069,89 @@ int main(void)
         expect_flag("F2 0F 13 bad", 64, movlps_f2, 4, C_BAD, 1);
     }
 
+    // 3DNow! names its opcode in the trailing immediate byte, and AMD
+    // assigned only 24 of the 256 selectors. The rest of the byte space
+    // names no instruction, under any prefix: F2 and 66 keep the form the
+    // bare encoding has (binutils and LLVM agree) and only the selector
+    // decides. The last assertion takes the memory form, whose selector
+    // follows the displacement.
+    {
+        static const uint8_t now_0c[] = { 0x0F, 0x0F, 0xC1, 0x0C };
+        static const uint8_t now_0d[] = { 0x0F, 0x0F, 0xC1, 0x0D };
+        static const uint8_t now_1c[] = { 0x0F, 0x0F, 0xC1, 0x1C };
+        static const uint8_t now_1d[] = { 0x0F, 0x0F, 0xC1, 0x1D };
+        static const uint8_t now_8a[] = { 0x0F, 0x0F, 0xC1, 0x8A };
+        static const uint8_t now_8e[] = { 0x0F, 0x0F, 0xC1, 0x8E };
+        static const uint8_t now_90[] = { 0x0F, 0x0F, 0xC1, 0x90 };
+        static const uint8_t now_94[] = { 0x0F, 0x0F, 0xC1, 0x94 };
+        static const uint8_t now_96[] = { 0x0F, 0x0F, 0xC1, 0x96 };
+        static const uint8_t now_97[] = { 0x0F, 0x0F, 0xC1, 0x97 };
+        static const uint8_t now_9a[] = { 0x0F, 0x0F, 0xC1, 0x9A };
+        static const uint8_t now_9e[] = { 0x0F, 0x0F, 0xC1, 0x9E };
+        static const uint8_t now_a0[] = { 0x0F, 0x0F, 0xC1, 0xA0 };
+        static const uint8_t now_a4[] = { 0x0F, 0x0F, 0xC1, 0xA4 };
+        static const uint8_t now_a6[] = { 0x0F, 0x0F, 0xC1, 0xA6 };
+        static const uint8_t now_a7[] = { 0x0F, 0x0F, 0xC1, 0xA7 };
+        static const uint8_t now_aa[] = { 0x0F, 0x0F, 0xC1, 0xAA };
+        static const uint8_t now_ae[] = { 0x0F, 0x0F, 0xC1, 0xAE };
+        static const uint8_t now_b0[] = { 0x0F, 0x0F, 0xC1, 0xB0 };
+        static const uint8_t now_b4[] = { 0x0F, 0x0F, 0xC1, 0xB4 };
+        static const uint8_t now_b6[] = { 0x0F, 0x0F, 0xC1, 0xB6 };
+        static const uint8_t now_b7[] = { 0x0F, 0x0F, 0xC1, 0xB7 };
+        static const uint8_t now_bb[] = { 0x0F, 0x0F, 0xC1, 0xBB };
+        static const uint8_t now_bf[] = { 0x0F, 0x0F, 0xC1, 0xBF };
+        static const uint8_t nowbad_00[] = { 0x0F, 0x0F, 0xC1, 0x00 };
+        static const uint8_t nowbad_01[] = { 0x0F, 0x0F, 0xC1, 0x01 };
+        static const uint8_t nowbad_0b[] = { 0x0F, 0x0F, 0xC1, 0x0B };
+        static const uint8_t nowbad_0e[] = { 0x0F, 0x0F, 0xC1, 0x0E };
+        static const uint8_t nowbad_40[] = { 0x0F, 0x0F, 0xC1, 0x40 };
+        static const uint8_t nowbad_7f[] = { 0x0F, 0x0F, 0xC1, 0x7F };
+        static const uint8_t nowbad_8b[] = { 0x0F, 0x0F, 0xC1, 0x8B };
+        static const uint8_t nowbad_ab[] = { 0x0F, 0x0F, 0xC1, 0xAB };
+        static const uint8_t nowbad_c0[] = { 0x0F, 0x0F, 0xC1, 0xC0 };
+        static const uint8_t nowbad_ff[] = { 0x0F, 0x0F, 0xC1, 0xFF };
+        static const uint8_t now_66[] = { 0x66, 0x0F, 0x0F, 0xC1, 0xBF };
+        static const uint8_t now_f2[] = { 0xF2, 0x0F, 0x0F, 0xC1, 0xBF };
+        static const uint8_t now_mem[] = { 0x0F, 0x0F, 0x90, 0x12, 0x90, 0x90, 0x90, 0x90 };
+        expect_flag("3DNow selector 0C ok", 64, now_0c, 4, C_BAD, 0);
+        expect_flag("3DNow selector 0D ok", 64, now_0d, 4, C_BAD, 0);
+        expect_flag("3DNow selector 1C ok", 64, now_1c, 4, C_BAD, 0);
+        expect_flag("3DNow selector 1D ok", 64, now_1d, 4, C_BAD, 0);
+        expect_flag("3DNow selector 8A ok", 64, now_8a, 4, C_BAD, 0);
+        expect_flag("3DNow selector 8E ok", 64, now_8e, 4, C_BAD, 0);
+        expect_flag("3DNow selector 90 ok", 64, now_90, 4, C_BAD, 0);
+        expect_flag("3DNow selector 94 ok", 64, now_94, 4, C_BAD, 0);
+        expect_flag("3DNow selector 96 ok", 64, now_96, 4, C_BAD, 0);
+        expect_flag("3DNow selector 97 ok", 64, now_97, 4, C_BAD, 0);
+        expect_flag("3DNow selector 9A ok", 64, now_9a, 4, C_BAD, 0);
+        expect_flag("3DNow selector 9E ok", 64, now_9e, 4, C_BAD, 0);
+        expect_flag("3DNow selector A0 ok", 64, now_a0, 4, C_BAD, 0);
+        expect_flag("3DNow selector A4 ok", 64, now_a4, 4, C_BAD, 0);
+        expect_flag("3DNow selector A6 ok", 64, now_a6, 4, C_BAD, 0);
+        expect_flag("3DNow selector A7 ok", 64, now_a7, 4, C_BAD, 0);
+        expect_flag("3DNow selector AA ok", 64, now_aa, 4, C_BAD, 0);
+        expect_flag("3DNow selector AE ok", 64, now_ae, 4, C_BAD, 0);
+        expect_flag("3DNow selector B0 ok", 64, now_b0, 4, C_BAD, 0);
+        expect_flag("3DNow selector B4 ok", 64, now_b4, 4, C_BAD, 0);
+        expect_flag("3DNow selector B6 ok", 64, now_b6, 4, C_BAD, 0);
+        expect_flag("3DNow selector B7 ok", 64, now_b7, 4, C_BAD, 0);
+        expect_flag("3DNow selector BB ok", 64, now_bb, 4, C_BAD, 0);
+        expect_flag("3DNow selector BF ok", 64, now_bf, 4, C_BAD, 0);
+        expect_flag("3DNow selector 00 bad", 64, nowbad_00, 4, C_BAD, 1);
+        expect_flag("3DNow selector 01 bad", 64, nowbad_01, 4, C_BAD, 1);
+        expect_flag("3DNow selector 0B bad", 64, nowbad_0b, 4, C_BAD, 1);
+        expect_flag("3DNow selector 0E bad", 64, nowbad_0e, 4, C_BAD, 1);
+        expect_flag("3DNow selector 40 bad", 64, nowbad_40, 4, C_BAD, 1);
+        expect_flag("3DNow selector 7F bad", 64, nowbad_7f, 4, C_BAD, 1);
+        expect_flag("3DNow selector 8B bad", 64, nowbad_8b, 4, C_BAD, 1);
+        expect_flag("3DNow selector AB bad", 64, nowbad_ab, 4, C_BAD, 1);
+        expect_flag("3DNow selector C0 bad", 64, nowbad_c0, 4, C_BAD, 1);
+        expect_flag("3DNow selector FF bad", 64, nowbad_ff, 4, C_BAD, 1);
+        expect_flag("66 3DNow pavgusb ok", 64, now_66, 5, C_BAD, 0);
+        expect_flag("F2 3DNow pavgusb ok", 64, now_f2, 5, C_BAD, 0);
+        expect_flag("3DNow memory operand ok", 64, now_mem, 8, C_BAD, 0);
+    }
+
     // System groups: CR/DR moves, RDRAND/RDSEED, fences, FS/GS base, save/restore, prefetch.
     {
         // 0F 20-23: the reg field names the CR/DR operand, r/m names the GPR.
