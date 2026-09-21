@@ -1527,13 +1527,39 @@ got_opcode:
             diza->opcode2 == 0xAE && (mpeek >> 6) == 3 && reg <= 4 &&
             diza->p_rep != 0xF3)
             diza->flag |= C_BAD;
-        // PREFETCHh (0F 18 /0-/3) and PREFETCH/PREFETCHW (0F 0D /0 /1) are
-        // defined only with a memory operand, so their mod=3 encodings are
-        // reserved. The 0F 18 /4-/7 NOPs keep their mod=3 form.
+        // The fence slot is byte-exact for MFENCE /6 and SFENCE /7 (0F AE F0
+        // and 0F AE F8), so a nonzero rm is not one of them; LFENCE keeps the
+        // rm binutils tolerates. The 66 and F2 /5 name nothing -- their /6 is
+        // TPAUSE and UMWAIT, whose r/m is a general register and stays -- and
+        // the F3 /5 and /6 (INCSSPD and UMONITOR) keep theirs as well.
+        if (diza->map == XDE_MAP_0F && legacy_enc && diza->opcode2 == 0xAE &&
+            (mpeek >> 6) == 3 && (mpeek & 7) != 0 &&
+            ((reg == 6 && !diza->p_66 && diza->p_rep == 0) || reg == 7))
+            diza->flag |= C_BAD;
+        if (diza->map == XDE_MAP_0F && legacy_enc && diza->opcode2 == 0xAE &&
+            (mpeek >> 6) == 3 && reg == 5 &&
+            (diza->p_66 || diza->p_rep == 0xF2))
+            diza->flag |= C_BAD;
+        // The 0F AE memory table has no 66 reading of /4 and /5 -- XSAVE64
+        // and XRSTOR64 are REX.W forms -- no F2 reading of /4-/7 at all, and
+        // no F3 reading of /5 or /7, whose F3 /4 and /6 are PTWRITE and
+        // CLRSSBSY.
+        if (diza->map == XDE_MAP_0F && legacy_enc && diza->opcode2 == 0xAE &&
+            (mpeek >> 6) != 3 &&
+            ((diza->p_66 && (reg == 4 || reg == 5)) ||
+             (diza->p_rep == 0xF2 && reg >= 4) ||
+             (diza->p_rep == 0xF3 && (reg == 5 || reg == 7))))
+            diza->flag |= C_BAD;
+        // PREFETCHh (0F 18 /0-/3) and PREFETCH/PREFETCHW/PREFETCHWT1
+        // (0F 0D /0 /1 and /2-/7, which the SDM leaves blank) are defined only
+        // with a memory operand, so their mod=3 encodings are reserved. The
+        // 0F 18 /4-/7 slots stay as they were: binutils rejects their mod=3
+        // form while the LLVM tables behind capstone call it a NOP, and the
+        // SDM's own table leaves the slot blank, so the flag is left clear.
         if (diza->opcode == 0x0F && diza->map == XDE_MAP_0F &&
             (mpeek >> 6) == 3 &&
             ((diza->opcode2 == 0x18 && reg <= 3) ||
-             (diza->opcode2 == 0x0D && reg <= 1)))
+             diza->opcode2 == 0x0D))
             diza->flag |= C_BAD;
         // The 0F 00 group defines SLDT/STR (/0 /1), LLDT/LTR (/2 /3) and
         // VERR/VERW (/4 /5) in the register form and the memory form alike, so
@@ -1613,22 +1639,28 @@ got_opcode:
         //     pointer loads.
         //   0F C3  MOVNTI m32/m64, 0F E7 MOVNTQ m64 and its 66 MOVNTDQ m128.
         //   F2 0F F0  LDDQU m128.
+        // LSS, LFS and LGS carry no mandatory prefix, so F2 and F3 leave
+        // them in the same memory-only form; the F3 reading of 0F C3 and of
+        // 0F E7 is not MOVNTI/MOVNTQ at all, which is why those two keep
+        // their gate.
         if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) == 3 &&
             (((diza->opcode2 == 0x12 || diza->opcode2 == 0x16) &&
               diza->p_66 && !diza->p_rep) ||
-             ((diza->opcode2 == 0xB2 || diza->opcode2 == 0xB4 ||
-               diza->opcode2 == 0xB5 || diza->opcode2 == 0xC3 ||
-               diza->opcode2 == 0xE7) && !diza->p_rep) ||
+             diza->opcode2 == 0xB2 || diza->opcode2 == 0xB4 ||
+             diza->opcode2 == 0xB5 ||
+             ((diza->opcode2 == 0xC3 || diza->opcode2 == 0xE7) &&
+              !diza->p_rep) ||
              (diza->opcode2 == 0xF0 && diza->p_rep == 0xF2)))
             diza->flag |= C_BAD;
-        // PMOVMSKB (0F D7, 66 for the xmm form) and MASKMOVQ/MASKMOVDQU
-        // (0F F7, 66 for the xmm form) name their r/m register, as does
-        // MOVDQ2Q (F2 0F D6); the plain and 66 readings of 0F D6 are the MOVQ
-        // r/m forms and must keep their mod=3 encoding.
+        // PMOVMSKB (0F D7, 66 for the xmm form; F2 and F3 leave it the same
+        // register form) and MASKMOVQ/MASKMOVDQU (0F F7, 66 for the xmm
+        // form) name their r/m register, as do MOVDQ2Q (F2 0F D6) and MOVQ2DQ
+        // (F3 0F D6); the plain and 66 readings of 0F D6 are the MOVQ r/m
+        // forms and must keep their mod=3 encoding.
         if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) != 3 &&
-            (((diza->opcode2 == 0xD7 || diza->opcode2 == 0xF7) &&
-              !diza->p_rep) ||
-             (diza->opcode2 == 0xD6 && diza->p_rep == 0xF2)))
+            ((diza->opcode2 == 0xD7 || diza->opcode2 == 0xF7 ||
+              (diza->opcode2 == 0xD6 &&
+               (diza->p_rep == 0xF2 || diza->p_rep == 0xF3)))))
             diza->flag |= C_BAD;
         // The 0F 38 map: MOVNTDQA (66 0F 38 2A), the INVEPT/INVVPID/INVPCID
         // descriptor operands (66 0F 38 80-82), MOVBE (0F 38 F0/F1, whose F2
@@ -1646,6 +1678,94 @@ got_opcode:
              (diza->opcode3 == 0xF6 && !diza->p_66 && !diza->p_rep) ||
              (diza->opcode3 == 0xF8 && (diza->p_66 || diza->p_rep == 0xF2)) ||
              (diza->opcode3 == 0xF9 && !diza->p_66 && !diza->p_rep)))
+            diza->flag |= C_BAD;
+        // The group shifts (0F 71 / 0F 72 / 0F 73) take the register the r/m
+        // field names together with an immediate count, and /reg selects the
+        // operation: 2, 4 and 6 for PSRLW/PSRAW/PSLLW and PSRLD/PSRAD/PSLLD,
+        // 2 and 6 for PSRLQ and PSLLQ, plus 3 and 7 for the 66-only PSRLDQ
+        // and PSLLDQ. Every memory operand, and every other /reg, is empty.
+        if (diza->map == XDE_MAP_0F && legacy_enc &&
+            (diza->opcode2 == 0x71 || diza->opcode2 == 0x72)) {
+            if ((mpeek >> 6) != 3 || reg == 0 || (reg & 1))
+                diza->flag |= C_BAD;
+        }
+        if (diza->map == XDE_MAP_0F && legacy_enc && diza->opcode2 == 0x73) {
+            if ((mpeek >> 6) != 3 ||
+                !(reg == 2 || reg == 6 ||
+                  (diza->p_66 && (reg == 3 || reg == 7))))
+                diza->flag |= C_BAD;
+        }
+        // The VIA PadLock group is register-only and byte-exact: MONTMUL,
+        // XSHA1 and XSHA256 are 0F A6 /0-/2 and XSTORE-RNG with the XCRYPT
+        // modes are 0F A7 /0-/5, each with rm=0 and no memory form.
+        if (diza->map == XDE_MAP_0F && legacy_enc &&
+            (diza->opcode2 == 0xA6 || diza->opcode2 == 0xA7)) {
+            unsigned last = (diza->opcode2 == 0xA6) ? 2 : 5;
+            if ((mpeek >> 6) != 3 || reg > last || (mpeek & 7) != 0)
+                diza->flag |= C_BAD;
+        }
+        // PEXTRW (0F C5, 66 for the xmm form) and the AMD EXTRQ / INSERTQ
+        // (66 and F2 0F 78 / 0F 79, whose second operand is an immediate)
+        // name their r/m in a register.
+        if (diza->map == XDE_MAP_0F && legacy_enc && (mpeek >> 6) != 3 &&
+            (diza->opcode2 == 0xC5 ||
+             ((diza->opcode2 == 0x78 || diza->opcode2 == 0x79) &&
+              (diza->p_66 || diza->p_rep == 0xF2))))
+            diza->flag |= C_BAD;
+        // BNDLDX and BNDSTX (0F 1A / 0F 1B) name one of the four bound
+        // registers in /reg and take a mib operand, which the SDM's operand
+        // type excludes the no-base form of. The 66, F2 and F3 selections
+        // (BNDMOV, BNDCU/BNDCN, BNDCL and BNDMK) name the same four
+        // registers, BNDMOV taking a plain m128 that does have the no-base
+        // form; the bare reading and F3 0F 1B are NOPs that name no operand
+        // at all, though BNDMK keeps the mib operand its memory form has.
+        if (diza->map == XDE_MAP_0F && legacy_enc &&
+            (diza->opcode2 == 0x1A || diza->opcode2 == 0x1B)) {
+            unsigned rm = mpeek & 7;
+            int bare_or_bndmk = (diza->p_66 == 0 && diza->p_rep == 0) ||
+                                (diza->p_rep == 0xF3 && diza->opcode2 == 0x1B);
+            if ((mpeek >> 6) == 3) {
+                if (!bare_or_bndmk &&
+                    (reg > 3 || (diza->p_66 && rm > 3)))
+                    diza->flag |= C_BAD;
+            } else if (reg > 3 ||
+                       (bare_or_bndmk && (mpeek >> 6) == 0 && rm == 5)) {
+                diza->flag |= C_BAD;
+            }
+        }
+        // Group 9 (0F C7) selects by /reg: /1 CMPXCHG8B, /3 XRSTORS, /4
+        // XSAVEC, /5 XSAVES, /6 VMPTRLD and /7 VMPTRST in memory, with 66 and
+        // F3 giving VMCLEAR and VMXON at /6, and F2 defining no /6 at all.
+        // At mod=3 /6 and /7 are RDRAND and RDSEED, F3 /6 being SENDUIPI, and
+        // the register form has no other encoding, nor any F2 one.
+        if (diza->map == XDE_MAP_0F && legacy_enc && diza->opcode2 == 0xC7) {
+            if ((mpeek >> 6) == 3) {
+                if (reg < 6 || diza->p_rep == 0xF2)
+                    diza->flag |= C_BAD;
+            } else if (reg == 0 || reg == 2 ||
+                       (diza->p_rep == 0xF2 && reg == 6)) {
+                diza->flag |= C_BAD;
+            }
+        }
+        // The Key Locker forms the F3 prefix selects are memory forms:
+        // AESENCWIDE128KL and its three siblings at 0F 38 D8 /0-/3, the
+        // AESENC/AESDEC 128KL and 256KL at DD-DF, whose /reg names the xmm
+        // operand, and ENQCMDS at 0F 38 F8. ENCODEKEY128 and ENCODEKEY256 at
+        // 0F 38 FA/FB move between two general registers instead.
+        if (diza->map == XDE_MAP_0F38 && legacy_enc && diza->p_rep == 0xF3) {
+            if ((diza->opcode3 == 0xD8 && ((mpeek >> 6) == 3 || reg > 3)) ||
+                ((diza->opcode3 == 0xDD || diza->opcode3 == 0xDE ||
+                  diza->opcode3 == 0xDF || diza->opcode3 == 0xF8) &&
+                 (mpeek >> 6) == 3) ||
+                ((diza->opcode3 == 0xFA || diza->opcode3 == 0xFB) &&
+                 (mpeek >> 6) != 3))
+                diza->flag |= C_BAD;
+        }
+        // HRESET is the byte-exact 0F 3A F0 /0 form with the F3 prefix and an
+        // immediate; the rest of that group is empty.
+        if (diza->map == XDE_MAP_0F3A && legacy_enc && diza->p_rep == 0xF3 &&
+            diza->opcode3 == 0xF0 &&
+            ((mpeek >> 6) != 3 || reg != 0 || (mpeek & 7) != 0))
             diza->flag |= C_BAD;
         // x87: the blank slots of the escape tables D8-DF, which the SDM
         // reserves and neither mod=3 (the ST(i) table) nor the memory table
