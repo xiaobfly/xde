@@ -805,7 +805,7 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
     uint8_t mop;
     uint32_t attr, gattr;
     unsigned i, dbytes;
-    int twice;
+    int twice, rex_seen = 0;
 
     if (!opcode || !diza)
         return 0;
@@ -839,7 +839,12 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
         if (b == 0x66) {
             twice = diza->p_66 != 0;
             diza->p_66 = 0x66;
-            diza->defdata = (uint8_t)(diza->defdata == 2 ? 4 : 2);
+            // Only the last prefix of an SDM group counts, so a repeat keeps
+            // the operand-size override in force. Toggling it back would leave
+            // p_66 set at the mode default, and then the bytes xde_asm_buf()
+            // writes do not decode back to their own length.
+            if (!twice)
+                diza->defdata = (uint8_t)(diza->defdata == 2 ? 4 : 2);
             cur.p++;
             if (twice) diza->flag |= C_BAD;
             continue;
@@ -847,10 +852,12 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
         if (b == 0x67) {
             twice = diza->p_67 != 0;
             diza->p_67 = 0x67;
-            if (mode == 64)
-                diza->defaddr = (uint8_t)(diza->defaddr == 8 ? 4 : 8);
-            else
-                diza->defaddr = (uint8_t)(diza->defaddr == 2 ? 4 : 2);
+            if (!twice) {
+                if (mode == 64)
+                    diza->defaddr = (uint8_t)(diza->defaddr == 8 ? 4 : 8);
+                else
+                    diza->defaddr = (uint8_t)(diza->defaddr == 2 ? 4 : 2);
+            }
             cur.p++;
             if (twice) diza->flag |= C_BAD;
             continue;
@@ -893,6 +900,7 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
         diza->flag |= C_REX;
         if (diza->rex_w)
             diza->defdata = 8;
+        rex_seen = 1;
         cur.p++;
         if (!peek_byte(&cur, 0, &b))
             return 0;
@@ -1083,6 +1091,13 @@ int __cdecl xde_disasm_buf(const uint8_t *opcode, unsigned max_len,
     diza->enc = XDE_ENC_LEGACY;
 
 got_opcode:
+    // A REX prefix must be the last prefix before the opcode, so a REX
+    // immediately followed by one of the encodings that carry their own
+    // prefix bytes (VEX/EVEX/XOP/REX2) is an illegal form. It is accepted and
+    // marked unusable rather than rejected: xde_asm_buf() never emits REX
+    // alongside those, so such an input cannot survive a re-encode.
+    if (rex_seen && diza->enc != XDE_ENC_LEGACY)
+        diza->flag |= C_BAD;
     if (map >= XDE_MAP_COUNT)
         return 0;
     attr = xde_attr[map][mop];

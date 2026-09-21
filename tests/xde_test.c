@@ -112,6 +112,56 @@ static void expect_roundtrip(const char *name, unsigned mode, const uint8_t *b, 
     printf("ok %-28s rt %d\n", name, got);
 }
 
+// Assert the size-effect fields the prefix parser derived. They must agree
+// with the prefix bytes it recorded, or the struct contradicts itself.
+static void expect_sizes(const char *name, unsigned mode, const uint8_t *b, unsigned n,
+                         int want_defdata, int want_defaddr)
+{
+    struct xde_instr d;
+
+    if (xde_disasm_buf(b, n, &d, mode) != (int)n) {
+        fail(name, "decode length mismatch");
+        return;
+    }
+    if ((int)d.defdata != want_defdata || (int)d.defaddr != want_defaddr) {
+        char msg[128];
+        sprintf(msg, "defdata=%u defaddr=%u want=%d,%d", d.defdata, d.defaddr,
+                want_defdata, want_defaddr);
+        fail(name, msg);
+        return;
+    }
+    printf("ok %-28s defdata=%u defaddr=%u\n", name, d.defdata, d.defaddr);
+}
+
+// The bytes xde_asm() writes must decode back to exactly the length it wrote.
+// expect_roundtrip() cannot express this for a folded duplicate prefix, whose
+// output is deliberately shorter than its input.
+static void expect_selflen(const char *name, unsigned mode, const uint8_t *b, unsigned n)
+{
+    struct xde_instr d, d2;
+    uint8_t out[16];
+    int got, asz, back;
+    char hx[128];
+
+    got = xde_disasm_buf(b, n, &d, mode);
+    if (got != (int)n) {
+        char msg[128];
+        sprintf(msg, "disasm len=%d want=%u", got, n);
+        fail(name, msg);
+        return;
+    }
+    asz = xde_asm(out, &d);
+    back = asz > 0 ? xde_disasm_buf(out, (unsigned)asz, &d2, mode) : 0;
+    if (asz <= 0 || back != asz) {
+        char msg[128];
+        sprintf(msg, "asm=%d re-decoded=%d", asz, back);
+        fail(name, msg);
+        return;
+    }
+    hexbytes(hx, out, asz);
+    printf("ok %-28s self %s\n", name, hx);
+}
+
 // Assert that one object-set bit is present (want=1) or absent (want=0).
 // sel: 0 = src_set, 1 = dst_set, 2 = src_set2, 3 = dst_set2.
 static void expect_set(const char *name, unsigned mode, const uint8_t *b, unsigned n,
@@ -636,6 +686,64 @@ int main(void)
         } else {
             printf("ok %-28s F3 64 A4\n", "canonical f3 64");
         }
+    }
+    {
+        // A repeated 66/67 is the same SDM prefix group, so only the last one
+        // counts: the override stays in force instead of toggling back to the
+        // mode default. Cancelling it leaves p_66/p_67 set with a default
+        // operand/address size, and then the bytes xde_asm() writes no longer
+        // decode to their own length. C_BAD still marks the repeat.
+        static const uint8_t dup67[] = { 0x67, 0x67, 0x00, 0x06, 0x11, 0x22 };
+        static const uint8_t dup66_push[] = { 0x66, 0x66, 0x06 };
+        static const uint8_t dup66_jcc[] = { 0x66, 0x66, 0x0F, 0x80, 0x11, 0x22 };
+        static const uint8_t dup67_moffs[] = { 0x67, 0x67, 0xA0, 0x11, 0x22, 0x33, 0x44 };
+        static const uint8_t dup_seg[] = { 0x2E, 0x26, 0x06 };
+
+        expect_sizes("67 67 keeps addr16 (32)", 32, dup67, 6, 4, 2);
+        expect_len("67 67 add [si],al (32)", 32, dup67, 6, 6);
+        expect_selflen("67 67 self-consistent", 32, dup67, 6);
+        expect_flag("67 67 dup still bad", 32, dup67, 6, C_BAD, 1);
+
+        expect_sizes("66 66 keeps opsz16 (32)", 32, dup66_push, 3, 2, 4);
+        expect_len("66 66 push es (32)", 32, dup66_push, 3, 3);
+
+        expect_len("66 66 jcc rel16 (32)", 32, dup66_jcc, 6, 6);
+        expect_selflen("66 66 jcc self-consistent", 32, dup66_jcc, 6);
+        expect_flag("66 66 jcc dup still bad", 32, dup66_jcc, 6, C_BAD, 1);
+
+        expect_len("67 67 mov al,[moffs32] (64)", 64, dup67_moffs, 7, 7);
+        expect_selflen("67 67 moffs self-consistent", 64, dup67_moffs, 7);
+        expect_flag("67 67 moffs dup still bad", 64, dup67_moffs, 7, C_BAD, 1);
+
+        // The segment group is the precedent: a later segment prefix already
+        // replaces the earlier one, so the fold stays self-consistent.
+        expect_selflen("2E 26 seg last wins", 32, dup_seg, 3);
+        expect_flag("2E 26 dup still bad", 32, dup_seg, 3, C_BAD, 1);
+    }
+    {
+        // A REX prefix cannot be followed by a VEX/EVEX/XOP/REX2 lead byte:
+        // SDM treats that form as #UD, so it must not decode as an ordinary
+        // REX-prefixed instruction (which silently drops the REX byte on
+        // re-encoding). Legal REX and prefix-free VEX keep C_BAD clear.
+        static const uint8_t rex_vex2[] = { 0x40, 0xC5, 0x04, 0x08 };
+        static const uint8_t rex_vex3[] = { 0x48, 0xC4, 0xE2, 0x78, 0xF2, 0xC1 };
+        static const uint8_t rex_evex[] = { 0x48, 0x62, 0xF1, 0x7C, 0x48, 0x58, 0xC1 };
+        static const uint8_t rex_xop[] = { 0x48, 0x8F, 0xE9, 0x78, 0x81, 0xC1 };
+        static const uint8_t rex_rex2[] = {
+            0x66, 0x48, 0xD5, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00
+        };
+        static const uint8_t rex_xor[] = { 0x48, 0x31, 0xC0 };
+        static const uint8_t vex2_bare[] = { 0xC5, 0x04, 0x08 };
+        static const uint8_t vex2_vaddps[] = { 0xC5, 0xF8, 0x58, 0xC1 };
+
+        expect_flag("rex then vex2 bad", 64, rex_vex2, 4, C_BAD, 1);
+        expect_flag("rex then vex3 bad", 64, rex_vex3, 6, C_BAD, 1);
+        expect_flag("rex then evex bad", 64, rex_evex, 7, C_BAD, 1);
+        expect_flag("rex then xop bad", 64, rex_xop, 6, C_BAD, 1);
+        expect_flag("rex then rex2 bad", 64, rex_rex2, 9, C_BAD, 1);
+        expect_flag("rex xor not bad", 64, rex_xor, 3, C_BAD, 0);
+        expect_flag("vex2 without rex not bad", 64, vex2_bare, 3, C_BAD, 0);
+        expect_flag("vaddps not bad", 64, vex2_vaddps, 4, C_BAD, 0);
     }
     {
         static const uint8_t rep_movs[] = { 0xF3, 0xA4 };
