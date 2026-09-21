@@ -339,11 +339,15 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // VMPTRLD/VMPTRST and keep the generic memory path.
     int rdrand = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                   c2 == 0xC7 && mod == 3 && (reg == 6 || reg == 7));
-    // 0F AE with mod=3: /5 /6 /7 are LFENCE/MFENCE/SFENCE, which take no
-    // operand at all, and /0-/3 with the F3 prefix are the FS/GS base moves,
-    // whose r/m is a GPR.
+    // 0F AE with mod=3: /6 /7 are MFENCE/SFENCE, which take no operand at
+    // all, /5 without a prefix is LFENCE, and /0-/3 with the F3 prefix are the
+    // FS/GS base moves, whose r/m is a GPR.
+    // F3 0F AE /5 is INCSSPD/INCSSPQ: it shares mod=3 /5 with LFENCE but does
+    // read its r/m operand, so it must stay out of the fence rule.
+    int incssp = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                  c2 == 0xAE && mod == 3 && reg == 5 && diza->p_rep == 0xF3);
     int fence = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
-                 c2 == 0xAE && mod == 3 && reg >= 5);
+                 c2 == 0xAE && mod == 3 && reg >= 5 && !incssp);
     int fsgsbase = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                     c2 == 0xAE && mod == 3 && reg <= 3 &&
                     diza->p_rep == 0xF3);
@@ -359,11 +363,11 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     int rdssp = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                  c2 == 0x1E && mod == 3 && reg == 0 && diza->p_rep == 0xF3);
     // 0F 18 /4-/7, 0F 19, 0F 1D and 0F 1F are NOPs: their r/m operand is not
-    // accessed (parse_modrm still records the address registers). 0F 18 /0-/3
-    // (PREFETCHNTA/PREFETCHT0/T1/T2) and 0F 0D /0 /1 (PREFETCHW, PREFETCHWT1)
-    // do read memory but name no register operand either.
+    // accessed, register or memory (parse_modrm still records the address
+    // registers). 0F 18 /0-/3 (PREFETCHNTA/PREFETCHT0/T1/T2) and 0F 0D /0 /1
+    // (PREFETCHW, PREFETCHWT1) do read memory but name no register operand
+    // either; their reserved mod=3 encodings keep the generic path.
     int nop_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
-                  mod != 3 &&
                   (c2 == 0x19 || c2 == 0x1D || c2 == 0x1F ||
                    (c2 == 0x18 && reg >= 4)));
     int prefetch_ea = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
@@ -384,7 +388,7 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                        (reg == 1 || reg == 3 || reg == 4 || reg == 5 ||
                         reg == 7))));
     // Forms whose reg field is not a register operand at all.
-    int reg_not_dst = rdrand || fence || fsgsbase || endbr || nop1e ||
+    int reg_not_dst = rdrand || fence || incssp || fsgsbase || endbr || nop1e ||
                       nop_ea || prefetch_ea || rdssp;
 
     // 32-bit GP writes zero-extend in 64-bit mode.
@@ -487,9 +491,15 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
                 diza->src_set2 |= rset2;
                 diza->dst_set |= XSET_OTHER;
             }
-        } else if (fence || endbr || nop1e) {
-            // LFENCE/MFENCE/SFENCE, ENDBR64/ENDBR32 and 0F 1E's NOP Ev take
-            // no operand.
+        } else if (fence || endbr || nop1e || nop_ea) {
+            // LFENCE/MFENCE/SFENCE, ENDBR64/ENDBR32 and the NOP Ev group
+            // (0F 1E, 0F 18 /4-/7, 0F 19, 0F 1D, 0F 1F) take no operand.
+        } else if (incssp) {
+            // INCSSPD/INCSSPQ add the r/m GPR to the shadow stack pointer:
+            // the GPR is read and the SSP write folds into OTHER.
+            diza->src_set |= rset;
+            diza->src_set2 |= rset2;
+            diza->dst_set |= XSET_OTHER;
         } else if (rdssp) {
             // RDSSPD/RDSSPQ read the shadow stack pointer into r/m.
             diza->src_set |= XSET_OTHER;

@@ -1261,6 +1261,20 @@ int main(void)
         expect_flag("fxsave mem not bad", 64, fxsave_m, 3, C_BAD, 0);
     }
     {
+        // F3 0F AE /5 is the CET INCSSPD/INCSSPQ group. It shares mod=3 /5
+        // with LFENCE but does touch operands: the r/m GPR is added to the
+        // shadow stack pointer, which folds into OTHER.
+        static const uint8_t incsspd[] = { 0xF3, 0x0F, 0xAE, 0xE8 };
+        static const uint8_t incsspq[] = { 0xF3, 0x48, 0x0F, 0xAE, 0xE8 };
+        expect_set("incsspd src RAX", 64, incsspd, 4, 0, XSET_RAX, 1);
+        expect_set("incsspd (no src other)", 64, incsspd, 4, 0, XSET_OTHER, 0);
+        expect_set("incsspd dst other", 64, incsspd, 4, 1, XSET_OTHER, 1);
+        expect_set("incsspd (no dst RAX)", 64, incsspd, 4, 1, XSET_RAX, 0);
+        expect_set("incsspq src RAX", 64, incsspq, 5, 0, XSET_RAX, 1);
+        expect_set("incsspq dst other", 64, incsspq, 5, 1, XSET_OTHER, 1);
+        expect_set("incsspq (no dst RAX)", 64, incsspq, 5, 1, XSET_RAX, 0);
+    }
+    {
         // Memory forms that store into their r/m operand, plus the read-only
         // siblings that must stay source-only.
         static const uint8_t fxsave[] = { 0x0F, 0xAE, 0x00 };
@@ -1337,6 +1351,19 @@ int main(void)
         expect_set("0F 18 /4 nop (no src M)", 64, nop18_4, 3, 0, XSET_MEM, 0);
         expect_set("0F 18 /4 nop (no src other)", 64, nop18_4, 3, 0, XSET_OTHER, 0);
         expect_set("0F 18 /4 nop (no dst other)", 64, nop18_4, 3, 1, XSET_OTHER, 0);
+        // The same NOPs with a register operand (mod=3) access nothing either.
+        static const uint8_t nop1f_r[] = { 0x0F, 0x1F, 0xC0 };
+        static const uint8_t nop19_r[] = { 0x0F, 0x19, 0xC0 };
+        static const uint8_t nop1d_r[] = { 0x0F, 0x1D, 0xC0 };
+        static const uint8_t nop18_4r[] = { 0x0F, 0x18, 0xE0 };
+        expect_set("nop r/m Ev (no src other)", 64, nop1f_r, 3, 0, XSET_OTHER, 0);
+        expect_set("nop r/m Ev (no dst other)", 64, nop1f_r, 3, 1, XSET_OTHER, 0);
+        expect_set("0F 19 r/m nop (no src other)", 64, nop19_r, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 19 r/m nop (no dst other)", 64, nop19_r, 3, 1, XSET_OTHER, 0);
+        expect_set("0F 1D r/m nop (no src other)", 64, nop1d_r, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 1D r/m nop (no dst other)", 64, nop1d_r, 3, 1, XSET_OTHER, 0);
+        expect_set("0F 18 /4 r/m nop (no src other)", 64, nop18_4r, 3, 0, XSET_OTHER, 0);
+        expect_set("0F 18 /4 r/m nop (no dst other)", 64, nop18_4r, 3, 1, XSET_OTHER, 0);
         expect_set("endbr64 (no src other)", 64, endbr64, 4, 0, XSET_OTHER, 0);
         expect_set("endbr64 (no dst other)", 64, endbr64, 4, 1, XSET_OTHER, 0);
     }
