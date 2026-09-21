@@ -1337,6 +1337,13 @@ int main(void)
         expect_set("mfence (no dst other)", 64, mfence, 3, 1, XSET_OTHER, 0);
         expect_set("sfence (no src other)", 64, sfence, 3, 0, XSET_OTHER, 0);
         expect_set("sfence (no dst other)", 64, sfence, 3, 1, XSET_OTHER, 0);
+        // SFENCE is encoded by any opcode of the form 0F AE Fx, so the prefix
+        // slot is free: F3 0F AE F8 is still the operand-less store fence. The
+        // same prefix on /5 selects INCSSPD, which does have an operand.
+        static const uint8_t sfence_f3[] = { 0xF3, 0x0F, 0xAE, 0xF8 };
+        expect_set("sfence (F3) no src other", 64, sfence_f3, 4, 0, XSET_OTHER, 0);
+        expect_set("sfence (F3) no dst other", 64, sfence_f3, 4, 1, XSET_OTHER, 0);
+        expect_flag("sfence (F3) not bad", 64, sfence_f3, 4, C_BAD, 0);
         expect_set("rdfsbase dst RAX", 64, rdfsbase, 4, 1, XSET_RAX, 1);
         expect_set("rdfsbase (no src other)", 64, rdfsbase, 4, 0, XSET_OTHER, 0);
         expect_set("rdgsbase dst RAX", 64, rdgsbase, 4, 1, XSET_RAX, 1);
@@ -1372,6 +1379,83 @@ int main(void)
         expect_flag("wrgsbase not bad", 64, wrgsbase, 4, C_BAD, 0);
         expect_flag("incsspd not bad", 64, incsspd, 4, C_BAD, 0);
         expect_flag("fxsave mem not bad", 64, fxsave_m, 3, C_BAD, 0);
+    }
+    {
+        // F3 0F AE /4 is PTWRITE: the r/m GPR (mod=3) or the memory operand is
+        // read and encoded into a processor trace packet, so the instruction
+        // has a source but no destination, and no register operand other than
+        // the source one.
+        static const uint8_t ptwrite32[] = { 0xF3, 0x0F, 0xAE, 0xE0 };
+        static const uint8_t ptwrite64[] = { 0xF3, 0x48, 0x0F, 0xAE, 0xE0 };
+        static const uint8_t ptwrite_m[] = { 0xF3, 0x0F, 0xAE, 0x20 };
+        static const uint8_t ptwrite_m1[] = { 0xF3, 0x0F, 0xAE, 0x21 };
+        expect_set("ptwrite src RAX", 64, ptwrite32, 4, 0, XSET_RAX, 1);
+        expect_set("ptwrite (no src other)", 64, ptwrite32, 4, 0, XSET_OTHER, 0);
+        expect_set("ptwrite (no dst RAX)", 64, ptwrite32, 4, 1, XSET_RAX, 0);
+        expect_set("ptwrite (no dst other)", 64, ptwrite32, 4, 1, XSET_OTHER, 0);
+        expect_set("ptwrite r64 src RAX", 64, ptwrite64, 5, 0, XSET_RAX, 1);
+        expect_set("ptwrite r64 (no src other)", 64, ptwrite64, 5, 0, XSET_OTHER, 0);
+        expect_set("ptwrite r64 (no dst other)", 64, ptwrite64, 5, 1, XSET_OTHER, 0);
+        expect_set("ptwrite m src M", 64, ptwrite_m, 4, 0, XSET_MEM, 1);
+        expect_set("ptwrite m (no dst M)", 64, ptwrite_m, 4, 1, XSET_MEM, 0);
+        // The m form reads memory only, so the XSAVE mask of the same reg
+        // field must not leak in: with the base register off RAX, neither
+        // EDX:EAX half appears.
+        expect_set("ptwrite m (no src EAX)", 64, ptwrite_m1, 4, 0, XSET_EAX, 0);
+        expect_set("ptwrite m (no src EDX)", 64, ptwrite_m1, 4, 0, XSET_EDX, 0);
+        expect_flag("ptwrite not bad", 64, ptwrite32, 4, C_BAD, 0);
+    }
+    {
+        // WAITPKG: F3 0F AE /6 is UMONITOR, whose r/m GPR holds the address to
+        // monitor, F2 0F AE /6 is UMWAIT and 66 0F AE /6 is TPAUSE, whose r/m
+        // GPR holds the optimized-state hint. All three need mod=11, and all
+        // three are read-only: the destination is the monitor hardware or the
+        // wake-up state. UMWAIT and TPAUSE also read the EDX:EAX deadline and
+        // report the wake-up cause in CF, clearing the other arithmetic flags.
+        static const uint8_t umonitor[] = { 0xF3, 0x0F, 0xAE, 0xF0 };
+        static const uint8_t umonitor_c[] = { 0xF3, 0x0F, 0xAE, 0xF1 };
+        static const uint8_t umwait[] = { 0xF2, 0x0F, 0xAE, 0xF0 };
+        static const uint8_t umwait_c[] = { 0xF2, 0x0F, 0xAE, 0xF1 };
+        static const uint8_t tpause[] = { 0x66, 0x0F, 0xAE, 0xF0 };
+        static const uint8_t tpause_c[] = { 0x66, 0x0F, 0xAE, 0xF1 };
+        expect_set("umonitor src RAX", 64, umonitor, 4, 0, XSET_RAX, 1);
+        expect_set("umonitor (no src other)", 64, umonitor, 4, 0, XSET_OTHER, 0);
+        expect_set("umonitor (no src EDX)", 64, umonitor, 4, 0, XSET_EDX, 0);
+        expect_set("umonitor (no dst RAX)", 64, umonitor, 4, 1, XSET_RAX, 0);
+        expect_set("umonitor (no dst other)", 64, umonitor, 4, 1, XSET_OTHER, 0);
+        expect_set("umonitor ecx src RCX", 64, umonitor_c, 4, 0, XSET_RCX, 1);
+        expect_set("umwait src EAX", 64, umwait, 4, 0, XSET_EAX, 1);
+        expect_set("umwait src EDX", 64, umwait, 4, 0, XSET_EDX, 1);
+        expect_set("umwait (no src ECX)", 64, umwait, 4, 0, XSET_ECX, 0);
+        expect_set("umwait (no src other)", 64, umwait, 4, 0, XSET_OTHER, 0);
+        expect_set("umwait (no dst other)", 64, umwait, 4, 1, XSET_OTHER, 0);
+        expect_set("umwait dst FL", 64, umwait, 4, 1, XSET_FL, 1);
+        expect_set("umwait ecx src RCX", 64, umwait_c, 4, 0, XSET_RCX, 1);
+        expect_set("tpause src EAX", 64, tpause, 4, 0, XSET_EAX, 1);
+        expect_set("tpause src EDX", 64, tpause, 4, 0, XSET_EDX, 1);
+        expect_set("tpause (no src ECX)", 64, tpause, 4, 0, XSET_ECX, 0);
+        expect_set("tpause (no src other)", 64, tpause, 4, 0, XSET_OTHER, 0);
+        expect_set("tpause (no dst other)", 64, tpause, 4, 1, XSET_OTHER, 0);
+        expect_set("tpause dst FL", 64, tpause, 4, 1, XSET_FL, 1);
+        expect_set("tpause ecx src RCX", 64, tpause_c, 4, 0, XSET_RCX, 1);
+        expect_flag("umonitor not bad", 64, umonitor, 4, C_BAD, 0);
+        expect_flag("umwait not bad", 64, umwait, 4, C_BAD, 0);
+        expect_flag("tpause not bad", 64, tpause, 4, C_BAD, 0);
+    }
+    {
+        // F3 0F AE /6 with a memory operand is not UMONITOR -- that form needs
+        // mod=11 -- but the CET CLRSSBSY, which clears the busy flag of a
+        // supervisor shadow stack token in m64. The token is read and written,
+        // CF reports an invalid token and the other arithmetic flags are
+        // cleared, and no EDX:EAX state-component mask is involved: that mask
+        // belongs to the neighbouring 0F AE /4-/6 XSAVE forms.
+        static const uint8_t clrssbsy[] = { 0xF3, 0x0F, 0xAE, 0x31 };
+        expect_set("clrssbsy src M", 64, clrssbsy, 4, 0, XSET_MEM, 1);
+        expect_set("clrssbsy dst M", 64, clrssbsy, 4, 1, XSET_MEM, 1);
+        expect_set("clrssbsy (no src EAX)", 64, clrssbsy, 4, 0, XSET_EAX, 0);
+        expect_set("clrssbsy (no src EDX)", 64, clrssbsy, 4, 0, XSET_EDX, 0);
+        expect_set("clrssbsy dst FL", 64, clrssbsy, 4, 1, XSET_FL, 1);
+        expect_flag("clrssbsy not bad", 64, clrssbsy, 4, C_BAD, 0);
     }
     {
         // F3 0F AE /5 is the CET INCSSPD/INCSSPQ group. It shares mod=3 /5

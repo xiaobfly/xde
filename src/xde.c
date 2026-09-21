@@ -346,8 +346,35 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // read its r/m operand, so it must stay out of the fence rule.
     int incssp = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                   c2 == 0xAE && mod == 3 && reg == 5 && diza->p_rep == 0xF3);
+    // WAITPKG picks its instruction from the prefix on the shared /6 field:
+    // F3 0F AE /6 is UMONITOR, whose r/m GPR holds the address to monitor,
+    // F2 0F AE /6 is UMWAIT and 66 0F AE /6 is TPAUSE, whose r/m GPR holds
+    // the optimized-state hint. All three require mod=11 and all three read
+    // their r/m operand, so none of them is the operand-less MFENCE; UMWAIT
+    // and TPAUSE additionally read the EDX:EAX deadline.
+    int umonitor = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                    c2 == 0xAE && mod == 3 && reg == 6 && diza->p_rep == 0xF3);
+    int umwait = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                  c2 == 0xAE && mod == 3 && reg == 6 && diza->p_rep == 0xF2);
+    int tpause = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                  c2 == 0xAE && mod == 3 && reg == 6 && diza->p_rep == 0 &&
+                  diza->p_66 != 0);
+    int waitpkg = umonitor || umwait || tpause;
     int fence = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
-                 c2 == 0xAE && mod == 3 && reg >= 5 && !incssp);
+                 c2 == 0xAE && mod == 3 && reg >= 5 && !incssp && !waitpkg);
+    // F3 0F AE /4 is PTWRITE: the r/m GPR (mod=3) or the memory operand is
+    // read and encoded into a processor trace packet, so the instruction has
+    // a source but no destination operand. Its register form needs no branch
+    // of its own below: with the reg field out of the way it is the generic
+    // r/m read, and PTWRITE touches no flags.
+    int ptwrite = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                   c2 == 0xAE && reg == 4 && diza->p_rep == 0xF3);
+    // F3 0F AE /6 with a memory operand is not UMONITOR -- that form needs
+    // mod=11 -- but the CET CLRSSBSY, which clears the busy flag of a
+    // supervisor shadow stack token: the m64 is read and written and CF
+    // reports an invalid token. It takes no EDX:EAX state-component mask.
+    int clrssbsy = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
+                    c2 == 0xAE && mod != 3 && reg == 6 && diza->p_rep == 0xF3);
     int fsgsbase = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                     c2 == 0xAE && mod == 3 && reg <= 3 &&
                     diza->p_rep == 0xF3);
@@ -378,18 +405,19 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // (FXSAVE, STMXCSR, XSAVE, XSAVEOPT, and CLWB which is /6 with a 66
     // prefix) and 0F C7 /1 /3 /4 /5 /7 (CMPXCHG8B/16B, XRSTORS, XSAVEC,
     // XSAVES, VMPTRST, which writes the VMCS pointer to memory). Their
-    // read-only siblings FXRSTOR /1, LDMXCSR /2, XRSTOR /5 and VMPTRLD /6
-    // stay source-only.
+    // read-only siblings FXRSTOR /1, LDMXCSR /2, XRSTOR /5, VMPTRLD /6 and
+    // PTWRITE /4 (which only reads the traced data) stay source-only.
     int mem_store = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                      mod != 3 &&
                      ((c2 == 0xAE &&
-                       (reg == 0 || reg == 3 || reg == 4 || reg == 6)) ||
+                       (reg == 0 || reg == 3 || (reg == 4 && !ptwrite) ||
+                        reg == 6)) ||
                       (c2 == 0xC7 &&
                        (reg == 1 || reg == 3 || reg == 4 || reg == 5 ||
                         reg == 7))));
     // Forms whose reg field is not a register operand at all.
     int reg_not_dst = rdrand || fence || incssp || fsgsbase || endbr || nop1e ||
-                      nop_ea || prefetch_ea || rdssp;
+                      nop_ea || prefetch_ea || rdssp || ptwrite || waitpkg;
     // 0F C7 /1 with a memory operand is CMPXCHG8B, or CMPXCHG16B once REX.W
     // widens the operation. Both compare and conditionally load the EDX:EAX
     // pair (RDX:RAX for the 128-bit form), which is the one register pair the
@@ -400,12 +428,13 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     // XSAVE/XSAVEOPT/XSAVEC/XSAVES and XRSTOR/XRSTORS all read the
     // state-component mask from EDX:EAX. The remaining memory forms of these
     // groups (FXSAVE/FXRSTOR, LDMXCSR/STMXCSR, CLFLUSH/CLWB -- /6 with the 66
-    // prefix -- and the VMCS-pointer forms) take no mask.
+    // prefix -- and the VMCS-pointer forms) take no mask, and neither do the
+    // F3-prefixed /4 and /6, which are PTWRITE and CLRSSBSY.
     int xsave_mask = (diza->map == XDE_MAP_0F && diza->enc == XDE_ENC_LEGACY &&
                       mod != 3 &&
                       ((c2 == 0xAE &&
-                        (reg == 4 || reg == 5 ||
-                         (reg == 6 && diza->p_66 == 0))) ||
+                        ((reg == 4 && !ptwrite) || reg == 5 ||
+                         (reg == 6 && diza->p_66 == 0 && !clrssbsy))) ||
                        (c2 == 0xC7 && (reg == 3 || reg == 4 || reg == 5))));
 
     // 32-bit GP writes zero-extend in 64-bit mode.
@@ -578,6 +607,18 @@ static void apply_modrm_usage(struct xde_instr *diza, uint32_t attr,
     }
     if (xsave_mask)
         diza->src_set |= XSET_EAX | XSET_EDX;
+    // UMWAIT and TPAUSE read the wake-up deadline from EDX:EAX, the last
+    // implicit operand of the group, and report the wake-up cause in CF,
+    // clearing the other arithmetic flags. The r/m operand they read is the
+    // generic r/m read above, shared with UMONITOR's address register.
+    if (umwait || tpause) {
+        diza->src_set |= XSET_EAX | XSET_EDX;
+        diza->dst_set |= XSET_FL;
+    }
+    // CLRSSBSY reports an invalid shadow stack token in CF and clears the
+    // other arithmetic flags.
+    if (clrssbsy)
+        diza->dst_set |= XSET_FL;
 }
 
 static void apply_implicit_gp(struct xde_instr *diza, uint32_t attr)
